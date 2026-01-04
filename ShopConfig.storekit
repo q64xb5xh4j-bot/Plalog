@@ -1,0 +1,60 @@
+{
+  "identifier" : "Pralog_Shop_Config",
+  "nonRenewingSubscriptions" : [],
+  "products" : [
+    {
+      "displayPrice" : "300",
+      "familyShareable" : false,
+      "internalID" : "0F37D7C1",
+      "localizations" : [
+        {
+          "description" : "登録数無制限になります",
+          "displayName" : "スタンダードプラン",
+          "locale" : "ja"
+        }
+      ],
+      "productID" : "com.pralog.standard",
+      "referenceName" : "Standard Plan",
+      "type" : "NonConsumable"
+    },
+    {
+      "displayPrice" : "500",
+      "familyShareable" : false,
+      "internalID" : "1E48E8D2",
+      "localizations" : [
+        {
+          "description" : "無制限＋全拡張機能（推奨）",
+          "displayName" : "コマンダーパック",
+          "locale" : "ja"
+        }
+      ],
+      "productID" : "com.pralog.commander",
+      "referenceName" : "Commander Pack",
+      "type" : "NonConsumable"
+    },
+    {
+      "displayPrice" : "300",
+      "familyShareable" : false,
+      "internalID" : "2F59F9E3",
+      "localizations" : [
+        {
+          "description" : "拡張機能を追加します",
+          "displayName" : "拡張アドオン",
+          "locale" : "ja"
+        }
+      ],
+      "productID" : "com.pralog.upgrade",
+      "referenceName" : "Upgrade Add-on",
+      "type" : "NonConsumable"
+    }
+  ],
+  "settings" : {
+    "_failTransactionsEnabled" : false,
+    "_locale" : "ja",
+    "_storefront" : "JPN"
+  },
+  "version" : {
+    "major" : 3,
+    "minor" : 0
+  }
+}

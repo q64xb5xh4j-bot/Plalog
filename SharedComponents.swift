@@ -6,7 +6,137 @@
 import SwiftUI
 import SwiftData
 import PhotosUI
+import PhotosUI
 import UniformTypeIdentifiers
+import Photos // ✅ Helper for Album
+
+// MARK: - Common Styles (Shared)
+struct ScaleButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.95 : 1)
+            .animation(.easeInOut(duration: 0.1), value: configuration.isPressed)
+    }
+}
+
+// MARK: - Common Visual Elements
+struct OfficialBadge: View {
+    var body: some View {
+        Text("OFFICIAL")
+            .font(.system(size: 8, weight: .bold))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 4)
+            .padding(.vertical, 2)
+            .background(Color.blue)
+            .cornerRadius(4)
+    }
+}
+
+// MARK: - Photo Album Helper (Shared)
+class PhotoAlbumHelper {
+    static let shared = PhotoAlbumHelper()
+    private let albumName = "PLALOG"
+    
+    func saveImageToAlbum(_ image: UIImage, completion: @escaping (String?) -> Void) {
+        // 1. Check/Create Album
+        if let album = fetchAssetCollection(for: albumName) {
+            saveImage(image, to: album, completion: completion)
+        } else {
+            createAlbum(name: albumName) { [weak self] success in
+                if success, let self = self, let album = self.fetchAssetCollection(for: self.albumName) {
+                    self.saveImage(image, to: album, completion: completion)
+                } else {
+                    // Fallback: Camera Roll
+                    self?.saveImageToLibraryFallback(image, completion: completion)
+                }
+            }
+        }
+    }
+    
+    private func fetchAssetCollection(for title: String) -> PHAssetCollection? {
+        let fetchOptions = PHFetchOptions()
+        fetchOptions.predicate = NSPredicate(format: "title = %@", title)
+        let collection = PHAssetCollection.fetchAssetCollections(with: .album, subtype: .any, options: fetchOptions)
+        return collection.firstObject
+    }
+    
+    private func createAlbum(name: String, completion: @escaping (Bool) -> Void) {
+        PHPhotoLibrary.shared().performChanges({
+            PHAssetCollectionChangeRequest.creationRequestForAssetCollection(withTitle: name)
+        }, completionHandler: { success, error in
+            completion(success)
+        })
+    }
+    
+    private func saveImage(_ image: UIImage, to album: PHAssetCollection, completion: @escaping (String?) -> Void) {
+        var placeholder: PHObjectPlaceholder?
+        PHPhotoLibrary.shared().performChanges({
+            let createAssetRequest = PHAssetChangeRequest.creationRequestForAsset(from: image)
+            placeholder = createAssetRequest.placeholderForCreatedAsset
+            guard let albumChangeRequest = PHAssetCollectionChangeRequest(for: album),
+                  let assetPlaceholder = placeholder else { return }
+            let fastEnumeration = NSArray(object: assetPlaceholder)
+            albumChangeRequest.addAssets(fastEnumeration)
+        }, completionHandler: { success, error in
+            if success, let id = placeholder?.localIdentifier {
+                completion(id)
+            } else {
+                completion(nil)
+            }
+        })
+    }
+    
+    private func saveImageToLibraryFallback(_ image: UIImage, completion: @escaping (String?) -> Void) {
+        var placeholder: PHObjectPlaceholder?
+        PHPhotoLibrary.shared().performChanges {
+            let request = PHAssetChangeRequest.creationRequestForAsset(from: image)
+            placeholder = request.placeholderForCreatedAsset
+        } completionHandler: { success, _ in
+            completion(success ? placeholder?.localIdentifier : nil)
+        }
+    }
+    func getCloudIdentifier(from localIdentifier: String) async -> String? {
+        let library = PHPhotoLibrary.shared()
+        let localID = localIdentifier.components(separatedBy: "/").last ?? localIdentifier 
+        let cleanID = localID.replacingOccurrences(of: "asset://", with: "")
+        
+        return await withCheckedContinuation { continuation in
+            let identifiers = [cleanID]
+            let cloudIdentifiers = library.cloudIdentifierMappings(forLocalIdentifiers: identifiers)
+            
+            if let result = cloudIdentifiers[cleanID], let cloudID = try? result.get() {
+                continuation.resume(returning: cloudID.stringValue)
+            } else {
+                continuation.resume(returning: nil)
+            }
+        }
+    }
+    
+    func getLocalIdentifier(from cloudIdentifierString: String) async -> String? {
+        let library = PHPhotoLibrary.shared()
+        guard let cloudIdentifier = try? PHCloudIdentifier(stringValue: cloudIdentifierString) else { return nil }
+        
+        return await withCheckedContinuation { continuation in
+            let mappings = library.localIdentifierMappings(for: [cloudIdentifier])
+            if let result = mappings[cloudIdentifier], let localID = try? result.get() {
+                continuation.resume(returning: localID)
+            } else {
+                continuation.resume(returning: nil)
+            }
+        }
+    }
+}
+
+// MARK: - Image Render Logic (Shared)
+@MainActor
+class ImageRendererHelper {
+    static func render<Content: View>(view: Content, size: CGSize) -> UIImage? {
+        let renderer = ImageRenderer(content: view)
+        renderer.scale = 3.0 // High Resolution
+        renderer.proposedSize = ProposedViewSize(size)
+        return renderer.uiImage
+    }
+}
 
 // MARK: - Settings Row Component
 struct SettingsRow: View {
@@ -73,6 +203,7 @@ struct MissingImagesView: View {
     @State private var pickerSource: UIImagePickerController.SourceType = .photoLibrary
     @State private var targetKitForPhoto: Kit? = nil
     @State private var pickedImage: UIImage? = nil
+    @State private var pickedAssetID: String? = nil // ✅ New: Store Asset ID
     @State private var showActionSheet = false
     
     var displayedKits: [Kit] {
@@ -200,7 +331,7 @@ struct MissingImagesView: View {
                 }
             })
             .sheet(isPresented: $showImagePicker, onDismiss: savePickedImage) {
-                ImagePicker(sourceType: pickerSource, selectedImage: $pickedImage)
+                ImagePicker(sourceType: pickerSource, selectedImage: $pickedImage, selectedAssetID: $pickedAssetID)
             }
         }
     }
@@ -259,12 +390,22 @@ struct MissingImagesView: View {
     }
     
     private func savePickedImage() {
-        guard let image = pickedImage, let kit = targetKitForPhoto else { return }
-        if let fileName = saveImageToDocuments(image) {
-            kit.completedImageURLString = fileName
-            kit.updatedDate = Date()
+        guard let kit = targetKitForPhoto else { return }
+        
+        // 1. Asset IDがある場合 (Library参照)
+        if let assetID = pickedAssetID {
+             kit.completedImageURLString = "asset://" + assetID
+             kit.updatedDate = Date()
+        } 
+        // 2. 画像データがある場合 (カメラ撮影など)
+        else if let image = pickedImage {
+            if let fileName = saveImageToDocuments(image) {
+                kit.completedImageURLString = fileName
+                kit.updatedDate = Date()
+            }
         }
-        pickedImage = nil; targetKitForPhoto = nil
+        
+        pickedImage = nil; pickedAssetID = nil; targetKitForPhoto = nil
     }
     
     private func saveImageToDocuments(_ image: UIImage) -> String? {
@@ -276,60 +417,136 @@ struct MissingImagesView: View {
 }
 
 // MARK: - Web Image Search Modal
+// MARK: - Web Image Search Modal (Browser Redirect)
 struct WebImageSearchModal: View {
-    let kit: Kit
+    var kit: Kit? = nil
     @Binding var isPresented: Bool
-    @State private var searchText: String = ""
-    @State private var items: [YahooItem] = []
-    @State private var isLoading = false
-    @State private var errorMessage: String? = nil
+    var initialQuery: String? = nil
+    var onImageSelected: ((String) -> Void)? = nil
+    
+    @State private var searchText = ""
+    @State private var showImagePicker = false
+    @State private var pickedImage: UIImage? = nil
+    @State private var pickedAssetID: String? = nil
+    
     @ObservedObject private var themeManager = ThemeManager.shared
-    private let client = YahooShoppingClient.shared
     
     var body: some View {
         VStack(spacing: 0) {
+            // Header
             HStack {
-                Text("SEARCH BOX ART").font(.system(size: 16, weight: .bold, design: .monospaced))
+                Text("IMAGE HUNT").font(.system(size: 16, weight: .bold, design: .monospaced))
                 Spacer()
-                Button("CLOSE") { isPresented = false }.font(.system(size: 14, weight: .bold))
+                Button("閉じる") { isPresented = false }.font(.system(size: 14, weight: .bold))
             }.padding().background(Color(UIColor.secondarySystemBackground))
-            HStack {
-                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                TextField("Search...", text: $searchText).textFieldStyle(.plain).onSubmit { performSearch() }
-                Button(action: performSearch) { Text("GO").font(.callout.bold()).foregroundStyle(themeManager.currentTheme.mainColor) }
-            }.padding().background(Color(UIColor.systemBackground))
-            Divider()
-            if isLoading { Spacer(); ProgressView(); Spacer() }
-            else if let error = errorMessage { Spacer(); Text(error).foregroundStyle(.red).padding(); Spacer() }
-            else {
-                ScrollView {
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 100), spacing: 2)], spacing: 2) {
-                        ForEach(items) { item in
-                            Button { selectImage(item) } label: {
-                                AsyncImage(url: item.imageURL) { phase in
-                                    if let img = phase.image { img.resizable().scaledToFill() }
-                                    else { Color.gray.opacity(0.3) }
-                                }.frame(height: 100).clipped()
+            
+            ScrollView {
+                VStack(spacing: 24) {
+                    // Step 1: Search
+                    VStack(alignment: .leading, spacing: 12) {
+                        stepLabel(number: 1, text: "Webで画像を検索・保存")
+                        
+                        TextField("検索キーワード", text: $searchText)
+                            .textFieldStyle(.roundedBorder)
+                            .padding(.horizontal)
+                        
+                        Button {
+                            openGoogleImageSearch()
+                        } label: {
+                            HStack {
+                                Image(systemName: "safari")
+                                Text("Google画像検索を開く")
+                                    .font(.system(size: 16, weight: .bold))
                             }
+                            .frame(maxWidth: .infinity)
+                            .padding()
+                            .background(themeManager.currentTheme.mainColor)
+                            .foregroundStyle(.white)
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
                         }
+                        .padding(.horizontal)
+                        
+                        Text("※ Safariが開きます。画像を長押しして「写真に保存」してください。")
+                            .font(.caption).foregroundStyle(.secondary).padding(.horizontal)
+                    }
+                    
+                    Divider()
+                    
+                    // Step 2: Import
+                    VStack(alignment: .leading, spacing: 12) {
+                        stepLabel(number: 2, text: "保存した画像をインポート")
+                        
+                        Button {
+                            showImagePicker = true
+                        } label: {
+                            HStack {
+                                Image(systemName: "photo.on.rectangle")
+                                Text("ライブラリから選択")
+                                    .font(.system(size: 16, weight: .bold))
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding()
+                            .background(Color(UIColor.secondarySystemBackground))
+                            .foregroundStyle(.primary)
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                        }
+                        .padding(.horizontal)
+                    }
+                    
+                    if let img = pickedImage {
+                        Image(uiImage: img)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(height: 200)
+                            .cornerRadius(12)
+                            .padding()
                     }
                 }
+                .padding(.vertical, 24)
             }
-        }.onAppear { searchText = kit.title; performSearch() }
-    }
-    private func performSearch() {
-        guard !searchText.isEmpty else { return }
-        isLoading = true; errorMessage = nil; items = []
-        Task {
-            do {
-                let results = try await client.search(query: searchText)
-                await MainActor.run { self.items = results.filter { $0.imageURL != nil }; self.isLoading = false; if self.items.isEmpty { self.errorMessage = "No images found." } }
-            } catch { await MainActor.run { self.errorMessage = "Search failed."; self.isLoading = false } }
+        }
+        .onAppear {
+            if let q = initialQuery { searchText = q }
+            else if let k = kit { searchText = k.title }
+        }
+        .sheet(isPresented: $showImagePicker, onDismiss: handleImagePicked) {
+            ImagePicker(sourceType: .photoLibrary, selectedImage: $pickedImage, selectedAssetID: $pickedAssetID)
         }
     }
-    private func selectImage(_ item: YahooItem) {
-        guard let url = item.imageURL else { return }
-        kit.imageURLString = url.absoluteString; LocalHaptics.select(); isPresented = false
+    
+    private func stepLabel(number: Int, text: String) -> some View {
+        HStack {
+            Text("\(number)")
+                .font(.system(size: 12, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: 20, height: 20)
+                .background(Circle().fill(themeManager.currentTheme.mainColor))
+            Text(text)
+                .font(.system(size: 14, weight: .bold))
+            Spacer()
+        }.padding(.horizontal)
+    }
+    
+    private func openGoogleImageSearch() {
+        guard let encodedQuery = searchText.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
+              let url = URL(string: "https://www.google.com/search?tbm=isch&q=\(encodedQuery)") else { return }
+        UIApplication.shared.open(url)
+    }
+    
+    private func handleImagePicked() {
+        if let assetID = pickedAssetID {
+            onImageSelected?("asset://" + assetID)
+            isPresented = false
+        } else if let image = pickedImage {
+            // Save to Documents as fallback
+             if let data = image.jpegData(compressionQuality: 0.8) {
+                 let fileName = UUID().uuidString + ".jpg"
+                 let url = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent(fileName)
+                 try? data.write(to: url)
+                 onImageSelected?(fileName)
+                 isPresented = false
+             }
+        }
     }
 }
 
@@ -350,9 +567,14 @@ struct ItemManagementView: View {
     @State private var targetKitForPhoto: Kit? = nil
     @State private var showImagePicker = false
     @State private var pickedImage: UIImage? = nil
+    @State private var pickedAssetID: String? = nil // ✅ New
     @State private var pickerSource: UIImagePickerController.SourceType = .photoLibrary
     @State private var showPurgeAllConfirm1 = false
     @State private var showPurgeAllConfirm2 = false
+    
+    // Share State
+    @State private var showShareSheet: Bool = false
+    @State private var shareImage: UIImage? = nil
     
     var body: some View {
         ZStack {
@@ -442,8 +664,36 @@ struct ItemManagementView: View {
             }
             
             if isSelectionMode && !showDuplicateResolver && !selectedItems.isEmpty {
-                VStack {
+                VStack(spacing: 20) {
                     Spacer()
+                    
+                    // Share Button
+                    Button {
+                        LocalHaptics.select()
+                        let targets = kits.filter { selectedItems.contains($0.persistentModelID) }
+                        if let image = ImageRendererHelper.render(view: LootReportView(kits: targets, title: "ACQUISITION LOG"), size: CGSize(width: 1080, height: 1350)) {
+                            shareImage = image
+                            showShareSheet = true
+                        }
+                    } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: "square.and.arrow.up")
+                            Text("SHARE SELECTION (\(selectedItems.count))")
+                                .font(.system(size: 14, weight: .bold, design: .monospaced))
+                        }
+                        .foregroundStyle(themeManager.currentTheme.mainColor)
+                        .padding(.vertical, 14)
+                        .padding(.horizontal, 24)
+                        .background(Color.white)
+                        .cornerRadius(10)
+                        .shadow(color: .black.opacity(0.1), radius: 10, y: 5)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 10)
+                                .stroke(themeManager.currentTheme.mainColor, lineWidth: 2)
+                        )
+                    }
+
+                    // Delete Button
                     Button { LocalHaptics.select(); showBulkDeleteAlert = true } label: {
                         HStack(spacing: 12) {
                             Image(systemName: "trash")
@@ -458,8 +708,8 @@ struct ItemManagementView: View {
                         .shadow(color: .red.opacity(0.4), radius: 10, y: 5)
                     }
                     .padding(.bottom, 110)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
+                .transition(.move(edge: .bottom).combined(with: .opacity))
             }
 
             VStack {
@@ -480,7 +730,10 @@ struct ItemManagementView: View {
             Button("キャンセル", role: .cancel) { if !isSelectionMode { selectedItems.removeAll() } }
             Button("EXECUTE", role: .destructive) {
                 let targets = kits.filter { selectedItems.contains($0.persistentModelID) }
-                targets.forEach { modelContext.delete($0) }
+                targets.forEach { kit in 
+                    DeletionManager.shared.recordDeletion(uuid: kit.uuid)
+                    modelContext.delete(kit) 
+                }
                 isSelectionMode = false
                 selectedItems.removeAll()
             }
@@ -501,7 +754,12 @@ struct ItemManagementView: View {
             Button("キャンセル", role: .cancel) { targetKitForPhoto = nil }
         })
         .sheet(isPresented: $showImagePicker, onDismiss: savePickedImage) {
-            ImagePicker(sourceType: pickerSource, selectedImage: $pickedImage)
+            ImagePicker(sourceType: pickerSource, selectedImage: $pickedImage, selectedAssetID: $pickedAssetID)
+        }
+        .sheet(isPresented: $showShareSheet) {
+            if let image = shareImage {
+                ShareSheet(activityItems: [image])
+            }
         }
     }
     
@@ -540,12 +798,18 @@ struct ItemManagementView: View {
     }
 
     private func savePickedImage() {
-        guard let image = pickedImage, let kit = targetKitForPhoto else { return }
-        if let fileName = saveImageToDocuments(image) {
-            kit.completedImageURLString = fileName
+        guard let kit = targetKitForPhoto else { return }
+        
+        if let assetID = pickedAssetID {
+            kit.completedImageURLString = "asset://" + assetID
             kit.updatedDate = Date()
+        } else if let image = pickedImage {
+             if let fileName = saveImageToDocuments(image) {
+                 kit.completedImageURLString = fileName
+                 kit.updatedDate = Date()
+             }
         }
-        pickedImage = nil; targetKitForPhoto = nil
+        pickedImage = nil; pickedAssetID = nil; targetKitForPhoto = nil
     }
 
     private func saveImageToDocuments(_ image: UIImage) -> String? {
@@ -556,25 +820,92 @@ struct ItemManagementView: View {
     }
     
     private func duplicateResolverView() -> some View {
-        ScrollView {
-            VStack(spacing: 12) {
-                ForEach(duplicateGroups.indices, id: \.self) { index in
-                    VStack(alignment: .leading) {
-                        Text("GROUP #\(index + 1)").font(.caption.bold()).foregroundStyle(.yellow)
-                        ForEach(duplicateGroups[index]) { kit in
-                            HStack {
-                                VStack(alignment: .leading) {
-                                    Text(kit.title).font(.caption).lineLimit(1)
-                                    Text("\(kit.grade) \(kit.scale)").font(.system(size: 8)).foregroundStyle(.secondary)
-                                }
-                                Spacer()
-                                Button("PURGE") { modelContext.delete(kit); checkForDuplicates() }.font(.caption2.bold()).foregroundStyle(.red)
-                            }.padding(8).background(Color.white.opacity(0.05)).cornerRadius(4)
-                        }
-                    }.padding().background(Color.white.opacity(0.05)).cornerRadius(8)
+        VStack {
+            // Auto Resolve Button
+            Button {
+                autoResolveDuplicates()
+            } label: {
+                HStack {
+                    Image(systemName: "sparkles")
+                    Text("AI AUTO MERGE (KEEP BEST)")
                 }
-            }.padding()
+                .font(.system(size: 14, weight: .bold, design: .monospaced))
+                .foregroundStyle(.white)
+                .frame(maxWidth: .infinity)
+                .padding()
+                .background(themeManager.currentTheme.mainColor)
+                .cornerRadius(12)
+            }
+            .padding(.horizontal)
+            .padding(.top)
+            
+            Text("画像がある方、または作成日が古い方(オリジナル)を優先して残します。")
+                .font(.caption2).foregroundStyle(.secondary).padding(.bottom, 10)
+            
+            ScrollView {
+                VStack(spacing: 12) {
+                    ForEach(duplicateGroups.indices, id: \.self) { index in
+                        VStack(alignment: .leading) {
+                            Text("GROUP #\(index + 1)").font(.caption.bold()).foregroundStyle(.yellow)
+                            ForEach(duplicateGroups[index]) { kit in
+                                HStack {
+                                    VStack(alignment: .leading) {
+                                        Text(kit.title).font(.caption).lineLimit(1)
+                                        Text("\(kit.grade) \(kit.scale)").font(.system(size: 8)).foregroundStyle(.secondary)
+                                        if hasImage(kit) {
+                                            Text("HAS IMAGE").font(.system(size: 8, weight: .bold)).foregroundStyle(.green)
+                                        }
+                                        Text(kit.createdDate.formatted(date: .numeric, time: .omitted)).font(.system(size: 8)).foregroundStyle(.gray)
+                                    }
+                                    Spacer()
+                                    Button("PURGE") { 
+                                        DeletionManager.shared.recordDeletion(uuid: kit.uuid)
+                                        modelContext.delete(kit)
+                                        checkForDuplicates() 
+                                    }.font(.caption2.bold()).foregroundStyle(.red)
+                                }.padding(8).background(Color.white.opacity(0.05)).cornerRadius(4)
+                            }
+                        }.padding().background(Color.white.opacity(0.05)).cornerRadius(8)
+                    }
+                }.padding()
+            }
         }
+    }
+
+    private func hasImage(_ kit: Kit) -> Bool {
+        return (kit.imageData != nil) || (kit.imageURLString != nil && !kit.imageURLString!.isEmpty)
+    }
+
+    private func autoResolveDuplicates() {
+        var solvedCount = 0
+        
+        for group in duplicateGroups {
+            // Strategy:
+            // 1. Keep the one with Image Data (CloudKit) or Image URL
+            // 2. If both have images (or neither), keep the OLDER one (Original)
+            
+            let sorted = group.sorted { k1, k2 in
+                let k1HasImg = hasImage(k1)
+                let k2HasImg = hasImage(k2)
+                
+                if k1HasImg && !k2HasImg { return true }
+                if !k1HasImg && k2HasImg { return false }
+                
+                return k1.createdDate < k2.createdDate
+            }
+            
+            guard let keeper = sorted.first else { continue }
+            let losers = sorted.dropFirst()
+            
+            for loser in losers {
+                DeletionManager.shared.recordDeletion(uuid: loser.uuid)
+                modelContext.delete(loser)
+            }
+            solvedCount += 1
+        }
+        
+        LocalHaptics.success()
+        checkForDuplicates() // Refresh
     }
 
     private func toggleSelection(_ kit: Kit) {
@@ -603,7 +934,14 @@ struct ItemManagementView: View {
 // MARK: - ShareSheet
 struct ShareSheet: UIViewControllerRepresentable {
     var activityItems: [Any]
-    func makeUIViewController(context: Context) -> UIActivityViewController { UIActivityViewController(activityItems: activityItems, applicationActivities: nil) }
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        let controller = UIActivityViewController(activityItems: activityItems, applicationActivities: nil)
+        // iPad crash fix
+        controller.popoverPresentationController?.sourceRect = CGRect(x: UIScreen.main.bounds.width/2, y: UIScreen.main.bounds.height/2, width: 0, height: 0)
+        controller.popoverPresentationController?.sourceView = UIView()
+        controller.popoverPresentationController?.permittedArrowDirections = []
+        return controller
+    }
     func updateUIViewController(_ ui: UIActivityViewController, context: Context) {}
 }
 
@@ -633,6 +971,7 @@ struct PhAssetImage: View {
         }
     }
     
+    
     private func load() {
         let assets = PHAsset.fetchAssets(withLocalIdentifiers: [localIdentifier], options: nil)
         guard let asset = assets.firstObject else { return }
@@ -647,6 +986,40 @@ struct PhAssetImage: View {
         manager.requestImage(for: asset, targetSize: targetSize, contentMode: .aspectFill, options: options) { result, _ in
             if let res = result {
                 self.image = res
+            }
+        }
+    }
+}
+
+// MARK: - Universal Image View (CloudKit + Local Support)
+struct UniversalImageView: View {
+    let imageData: Data?
+    let imagePath: String?
+    
+    var body: some View {
+        Group {
+            if let data = imageData, let uiImage = UIImage(data: data) {
+                // 1. Prioritize CloudKit Data
+                Image(uiImage: uiImage)
+                    .resizable()
+            } else if let path = imagePath, !path.isEmpty {
+                // 2. Fallback to Local Path / Asset
+                if path.hasPrefix("asset://") {
+                    PhAssetImage(localIdentifier: String(path.dropFirst(8)))
+                } else if let url = ImageLinker.resolve(urlString: path) {
+                    AsyncImage(url: url) { phase in
+                        if let img = phase.image {
+                            img.resizable()
+                        } else {
+                            Color.gray.opacity(0.1)
+                        }
+                    }
+                } else {
+                    Color.gray.opacity(0.1)
+                }
+            } else {
+                // 3. No Image
+                Color.clear
             }
         }
     }
@@ -674,6 +1047,59 @@ struct ImageLinker {
         let url = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent(name)
         try? FileManager.default.removeItem(at: url)
     }
+    
+    // ✅ URL文字列を、ローカルファイルURLまたはリモートURLに解決する
+    static func resolve(urlString: String?) -> URL? {
+        guard let s = urlString, !s.isEmpty else { return nil }
+        // 1. HTTP/HTTPS -> Remote
+        if s.lowercased().hasPrefix("http") { return URL(string: s) }
+        
+        // 2. Local Documents Base
+        let docURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        
+        // 3. Try Exact Match (if simple filename) or Absolute Path
+        if s.hasPrefix("file://") {
+             if let url = URL(string: s), FileManager.default.fileExists(atPath: url.path) { return url }
+             // Fallback: Extract filename from file:// URL
+             if let url = URL(string: s) {
+                 let filename = url.lastPathComponent
+                 let fallbackURL = docURL.appendingPathComponent(filename)
+                 if FileManager.default.fileExists(atPath: fallbackURL.path) { return fallbackURL }
+             }
+        } else if s.contains("/") {
+            // Absolute path string or relative path with slashes
+            // Choice A: Try as is (e.g. legacy absolute path)
+            // Choice B: Extract filename and look in Documents (Handling App UUID change)
+            let filename = (s as NSString).lastPathComponent
+            let fallbackURL = docURL.appendingPathComponent(filename)
+            if FileManager.default.fileExists(atPath: fallbackURL.path) { return fallbackURL }
+        }
+        
+        // 4. Fallback: Treat as simple filename in Documents
+        let simpleName = (s as NSString).lastPathComponent // Ensure we only use filename part
+        let simpleURL = docURL.appendingPathComponent(simpleName)
+        return simpleURL // Return even if not exists, to let AsyncImage handle/fail
+    }
+    
+    // ✅ リモート画像をダウンロードして保存し、ファイル名を返す
+    static func downloadAndSave(from url: URL) async -> String? {
+        do {
+            let (data, _) = try await URLSession.shared.data(from: url)
+            guard let image = UIImage(data: data) else { return nil }
+            // JPEG圧縮して保存
+            guard let jpgData = image.jpegData(compressionQuality: 0.8) else { return nil }
+            
+            let fileName = UUID().uuidString + ".jpg"
+            let docURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            let fileURL = docURL.appendingPathComponent(fileName)
+            
+            try jpgData.write(to: fileURL)
+            return fileName
+        } catch {
+            print("Download failed: \(error)")
+            return nil
+        }
+    }
 }
 
 // MARK: - Kit Status Definition
@@ -698,21 +1124,113 @@ enum KitStatus: Int, CaseIterable, Identifiable {
     
     var labelShort: String {
         switch self {
-        case .wish: return "Wish"
-        case .reservation: return "Res."
-        case .stock: return "Stock"
-        case .inProgress: return "Prog."
-        case .complete: return "Comp."
+        case .wish: return "欲しい"
+        case .reservation: return "予約済"
+        case .stock: return "積み"
+        case .inProgress: return "製作中"
+        case .complete: return "完成"
         }
     }
     
     var labelLong: String {
         switch self {
-        case .wish: return "WISH"
-        case .reservation: return "RESERVED"
-        case .stock: return "STOCK"
-        case .inProgress: return "NOW"
-        case .complete: return "COMPLETE"
+        case .wish: return "ウィッシュリスト"
+        case .reservation: return "予約済み"
+        case .stock: return "積みプラ"
+        case .inProgress: return "製作中"
+        case .complete: return "完成済み"
         }
+    }
+}
+
+// MARK: - Official Badge
+
+
+// MARK: - Deletion Logic (Zombie Fix)
+// MARK: - Deletion Logic (Zombie Fix + Optimization)
+class DeletionManager {
+    static let shared = DeletionManager()
+    private let legacyKey = "deleted_kit_uuids" // Old format
+    private let limitKey = "deleted_kit_history_v2" // New format: [String: TimeInterval]
+    private let retentionPeriod: TimeInterval = 90 * 24 * 60 * 60 // 90 Days
+    
+    private init() {
+        migrateLegacyData()
+        pruneOldRecords()
+    }
+    
+    /// Records a deletion with current timestamp
+    func recordDeletion(uuid: String) {
+        var history = getHistory()
+        history[uuid] = Date().timeIntervalSince1970
+        saveHistory(history)
+        print("[DeletionManager] Recorded deletion for UUID: \(uuid)")
+    }
+    
+    /// Returns list of deleted UUIDs for SyncEnvelope
+    func getDeletedUUIDs() -> [String] {
+        return Array(getHistory().keys)
+    }
+    
+    // MARK: - Internal Logic
+    
+    private func getHistory() -> [String: TimeInterval] {
+        return UserDefaults.standard.dictionary(forKey: limitKey) as? [String: TimeInterval] ?? [:]
+    }
+    
+    private func saveHistory(_ history: [String: TimeInterval]) {
+        UserDefaults.standard.set(history, forKey: limitKey)
+    }
+    
+    /// Migrate from [String] to [String: TimeInterval]
+    private func migrateLegacyData() {
+        if let oldList = UserDefaults.standard.stringArray(forKey: legacyKey) {
+            print("[DeletionManager] Migrating \(oldList.count) legacy records...")
+            var history = getHistory()
+            let now = Date().timeIntervalSince1970
+            
+            for uuid in oldList {
+                // If not already in new history, add it with current time (reset clock)
+                if history[uuid] == nil {
+                    history[uuid] = now
+                }
+            }
+            
+            saveHistory(history)
+            UserDefaults.standard.removeObject(forKey: legacyKey)
+            print("[DeletionManager] Migration complete.")
+        }
+    }
+    
+    /// Remove records older than retentionPeriod
+    private func pruneOldRecords() {
+        var history = getHistory()
+        let threshold = Date().timeIntervalSince1970 - retentionPeriod
+        let initialCount = history.count
+        
+        // Filter in place
+        history = history.filter { $0.value > threshold }
+        
+        if history.count < initialCount {
+            saveHistory(history)
+            print("[DeletionManager] Pruned \(initialCount - history.count) old records (Retention: 90 days)")
+        }
+    }
+}
+
+// MARK: - Shape Utilities (Shared)
+extension View {
+    func cornerRadius(_ radius: CGFloat, corners: UIRectCorner) -> some View {
+        clipShape(RoundedCorner(radius: radius, corners: corners))
+    }
+}
+
+struct RoundedCorner: Shape {
+    var radius: CGFloat = .infinity
+    var corners: UIRectCorner = .allCorners
+
+    func path(in rect: CGRect) -> Path {
+        let path = UIBezierPath(roundedRect: rect, byRoundingCorners: corners, cornerRadii: CGSize(width: radius, height: radius))
+        return Path(path.cgPath)
     }
 }

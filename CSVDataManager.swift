@@ -32,7 +32,7 @@ class CSVDataManager: ObservableObject {
     static let shared = CSVDataManager()
     @Published var loadedKits: [CSVKitData] = []
     @Published var isLoading: Bool = false
-    
+
     // List of ALL supported manufacturer catalogs
     private let availableCatalogs = [
         "gunpla_catalog",      // Bandai / Gunpla (Main)
@@ -45,11 +45,13 @@ class CSVDataManager: ObservableObject {
         "maxfactory_dougram",  // MaxFactory
         "volks_models"         // Volks
     ]
-    
+
     init() {
         // Initial load in background
         Task {
             await reloadAll()
+            // Check for catalog updates in background (non-blocking)
+            await checkForCatalogUpdates()
         }
     }
     
@@ -99,29 +101,42 @@ class CSVDataManager: ObservableObject {
     }
     
     // カタログデータの読み込み (Simple 6-column format)
-    // Modified to be static/helper and return array instead of modifying state directly
+    // Modified to use GitHubReleaseManager for gunpla_catalog, fallback to Bundle
     private static func loadCatalog(filename: String) -> [CSVKitData]? {
-        guard let path = Bundle.main.path(forResource: filename, ofType: "csv") else { return nil }
-        return parseCSV(path: path, format: .catalog)
+        // Try GitHub Release Manager first (only for gunpla_catalog)
+        var csvContent: String?
+
+        if filename == "gunpla_catalog" {
+            csvContent = GitHubReleaseManager.shared.loadCatalog(filename: filename)
+        }
+
+        // Fallback to Bundle for all other cases
+        if csvContent == nil {
+            guard let path = Bundle.main.path(forResource: filename, ofType: "csv") else { return nil }
+            csvContent = try? String(contentsOfFile: path, encoding: .utf8)
+        }
+
+        guard let content = csvContent else { return nil }
+        return parseCSVContent(content, format: .catalog)
     }
     
     private enum CSVFormat {
         case master
         case catalog
     }
-    
-    private static func parseCSV(path: String, format: CSVFormat) -> [CSVKitData] {
+
+    // New method: parse CSV content directly (used by GitHubReleaseManager and Bundle)
+    private static func parseCSVContent(_ content: String, format: CSVFormat) -> [CSVKitData] {
         var results: [CSVKitData] = []
         do {
-            let content = try String(contentsOfFile: path, encoding: .utf8)
             let rows = content.components(separatedBy: "\n")
-            
+
             // Header check - simplified for robustness (skip logic handled below if needed)
             var startIndex = 0
             if let first = rows.first, (first.contains("uuid") || first.contains("jan,title")) {
                 startIndex = 1
             }
-            
+
             // Regex for CSV parsing (handles quoted fields)
             // Pattern matches: Quoted field ("...") OR Non-comma field ([^,]*), followed by comma or end of string
             let csvPattern = "(\"[^\"]*\"|[^,]*)(,|$)"
@@ -201,7 +216,7 @@ class CSVDataManager: ObservableObject {
                 }
             }
         } catch {
-            print("Error parsing CSV at \(path): \(error)")
+            print("Error parsing CSV content: \(error)")
         }
         return results
     }
@@ -505,5 +520,14 @@ class CSVDataManager: ObservableObject {
         }
         
         return updates
+    }
+
+    // MARK: - GitHub Release Updates
+
+    /// Check for catalog updates from GitHub and download if available
+    private func checkForCatalogUpdates() async {
+        await GitHubReleaseManager.shared.checkAndUpdateIfNeeded()
+        // After checking, reload if cache was updated
+        Task { await reloadAll() }
     }
 }

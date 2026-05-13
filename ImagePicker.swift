@@ -18,6 +18,9 @@ struct ImagePicker: UIViewControllerRepresentable {
     // 写真アプリ上のIDを受け渡すためのBinding
     var selectedAssetID: Binding<String?>? = nil
     
+    // ✅ Optional Callback to bypass auto-save (for Editing)
+    var onCameraCapture: ((UIImage) -> Void)? = nil
+    
     @Environment(\.presentationMode) private var presentationMode
 
     func makeUIViewController(context: UIViewControllerRepresentableContext<ImagePicker>) -> UIImagePickerController {
@@ -38,7 +41,6 @@ struct ImagePicker: UIViewControllerRepresentable {
 
     final class Coordinator: NSObject, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
         var parent: ImagePicker
-        private let albumName = "PLALOG" // ✅ 保存先のアルバム名
 
         init(_ parent: ImagePicker) {
             self.parent = parent
@@ -57,89 +59,24 @@ struct ImagePicker: UIViewControllerRepresentable {
                         }
                     }
                 } else if parent.sourceType == .camera {
-                    // カメラで撮影した場合: 「PLALOG」アルバムに保存してIDを取得
-                    saveImageToCustomAlbum(image)
+                    // カメラで撮影した場合
+                    
+                    if let onCapture = parent.onCameraCapture {
+                        // ✅ Bypass Saving -> Callback for Editor
+                        DispatchQueue.main.async {
+                            onCapture(image)
+                        }
+                    } else {
+                        // Default: Save to PLALOG Album
+                        PhotoSaver.shared.saveImageToCustomAlbum(image) { id in
+                            DispatchQueue.main.async {
+                                self.parent.selectedAssetID?.wrappedValue = id
+                            }
+                        }
+                    }
                 }
             }
             parent.presentationMode.wrappedValue.dismiss()
-        }
-        
-        // MARK: - Album Logic
-        
-        private func saveImageToCustomAlbum(_ image: UIImage) {
-            // 1. アルバムの存在確認・取得
-            if let album = fetchAssetCollection(for: albumName) {
-                saveImage(image, to: album)
-            } else {
-                // 2. なければ作成してから保存
-                createAlbum(name: albumName) { [weak self] success in
-                    if success, let album = self?.fetchAssetCollection(for: self?.albumName ?? "") {
-                        self?.saveImage(image, to: album)
-                    } else {
-                        // 失敗時は通常のカメラロール保存にフォールバック
-                        self?.saveImageToLibraryAndGetIDFallback(image)
-                    }
-                }
-            }
-        }
-        
-        private func fetchAssetCollection(for title: String) -> PHAssetCollection? {
-            let fetchOptions = PHFetchOptions()
-            fetchOptions.predicate = NSPredicate(format: "title = %@", title)
-            let collection = PHAssetCollection.fetchAssetCollections(with: .album, subtype: .any, options: fetchOptions)
-            return collection.firstObject
-        }
-        
-        private func createAlbum(name: String, completion: @escaping (Bool) -> Void) {
-            PHPhotoLibrary.shared().performChanges({
-                PHAssetCollectionChangeRequest.creationRequestForAssetCollection(withTitle: name)
-            }, completionHandler: { success, error in
-                if !success { print("Error creating album: \(String(describing: error))") }
-                completion(success)
-            })
-        }
-        
-        private func saveImage(_ image: UIImage, to album: PHAssetCollection) {
-            var placeholder: PHObjectPlaceholder?
-            
-            PHPhotoLibrary.shared().performChanges({
-                // 1. 画像アセットの作成リクエスト
-                let createAssetRequest = PHAssetChangeRequest.creationRequestForAsset(from: image)
-                placeholder = createAssetRequest.placeholderForCreatedAsset
-                
-                // 2. アルバムへの追加リクエスト
-                guard let albumChangeRequest = PHAssetCollectionChangeRequest(for: album),
-                      let assetPlaceholder = placeholder else { return }
-                
-                // 列挙型で渡す必要があるため配列にラップ
-                let fastEnumeration = NSArray(object: assetPlaceholder)
-                albumChangeRequest.addAssets(fastEnumeration)
-                
-            }, completionHandler: { success, error in
-                if success, let id = placeholder?.localIdentifier {
-                    DispatchQueue.main.async {
-                        self.parent.selectedAssetID?.wrappedValue = id
-                    }
-                } else {
-                    print("Error saving to album: \(String(describing: error))")
-                    // 失敗したら通常保存を試みる
-                    self.saveImageToLibraryAndGetIDFallback(image)
-                }
-            })
-        }
-        
-        private func saveImageToLibraryAndGetIDFallback(_ image: UIImage) {
-            var placeholder: PHObjectPlaceholder?
-            PHPhotoLibrary.shared().performChanges {
-                let request = PHAssetChangeRequest.creationRequestForAsset(from: image)
-                placeholder = request.placeholderForCreatedAsset
-            } completionHandler: { success, _ in
-                if success, let id = placeholder?.localIdentifier {
-                    DispatchQueue.main.async {
-                        self.parent.selectedAssetID?.wrappedValue = id
-                    }
-                }
-            }
         }
     }
 }

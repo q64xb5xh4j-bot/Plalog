@@ -1,5 +1,5 @@
-//
-//  GoogleSearchClient.swift V5
+//  GoogleSearchClient.swift V6
+//  Modified: 2026-01-04 15:30
 //  Plalog
 //
 //  Created by (User) on 2026/01/03.
@@ -22,16 +22,24 @@ struct GoogleItem: Identifiable {
 
 class GoogleSearchClient {
     static let shared = GoogleSearchClient()
-    private init() {}
     
     private var apiKey: String {
-        UserDefaults.standard.string(forKey: "googleApiKey")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return KeychainHelper.shared.read(service: "com.hiro.pralog", account: "googleApiKey") ?? ""
     }
     
     private var cx: String {
-        let rawCx = UserDefaults.standard.string(forKey: "googleSearchEngineId")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let rawCx = KeychainHelper.shared.read(service: "com.hiro.pralog", account: "googleSearchEngineId") ?? ""
         if rawCx.hasPrefix("cx=") { return String(rawCx.dropFirst(3)) }
         return rawCx
+    }
+    
+    // Shared session for scraping to prevent resource leaks
+    private let scrapSession: URLSession
+    
+    private init() {
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 3.0
+        self.scrapSession = URLSession(configuration: config)
     }
     
     func search(query: String) async throws -> [GoogleItem] {
@@ -93,7 +101,7 @@ class GoogleSearchClient {
         }
     }
     
-    private func isOfficialBandaiSite(url: String) -> Bool {
+    nonisolated private func isOfficialBandaiSite(url: String) -> Bool {
         let officialDomains = ["bandai-hobby.net", "gundam-base.net"]
         return officialDomains.contains { url.contains($0) }
     }
@@ -102,11 +110,7 @@ class GoogleSearchClient {
         guard let url = URL(string: urlString) else { return nil }
         
         do {
-            let config = URLSessionConfiguration.default
-            config.timeoutIntervalForRequest = 3.0 // Short timeout for speed
-            let session = URLSession(configuration: config)
-            
-            let (data, _) = try await session.data(from: url)
+            let (data, _) = try await scrapSession.data(from: url)
             guard let html = String(data: data, encoding: .utf8) else { return nil }
             
             // 1. バンダイホビーサイト: h1 (p-heading__h1-product) を最優先
@@ -135,25 +139,37 @@ class GoogleSearchClient {
         return nil
     }
     
-    private func extractText(from html: String, startTag: String, endTag: String) -> String? {
+    nonisolated private func extractText(from html: String, startTag: String, endTag: String) -> String? {
         guard let startRange = html.range(of: startTag) else { return nil }
         let subHtml = html[startRange.upperBound...]
         guard let endRange = subHtml.range(of: endTag) else { return nil }
         return String(subHtml[..<endRange.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private func decodeHTMLEntities(_ text: String) -> String {
-        guard let data = text.data(using: .utf8) else { return text }
-        
-        let options: [NSAttributedString.DocumentReadingOptionKey: Any] = [
-            .documentType: NSAttributedString.DocumentType.html,
-            .characterEncoding: String.Encoding.utf8.rawValue
+    nonisolated private func decodeHTMLEntities(_ text: String) -> String {
+        // Robust manual decoding instead of NSAttributedString (which requires Main Thread/UIKit)
+        var decoded = text
+        let entities = [
+            ("&quot;", "\""),
+            ("&apos;", "'"),
+            ("&lt;", "<"),
+            ("&gt;", ">"),
+            ("&amp;", "&"),
+            ("&nbsp;", " "),
+            ("&copy;", "©"),
+            ("&reg;", "®"),
+            ("&trade;", "™"),
+            ("&#39;", "'")
         ]
         
-        if let attributedString = try? NSAttributedString(data: data, options: options, documentAttributes: nil) {
-            return attributedString.string
+        for (entity, value) in entities {
+            decoded = decoded.replacingOccurrences(of: entity, with: value)
         }
-        return text
+        
+        // Remove other HTML tags if any remains
+        decoded = decoded.replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
+        
+        return decoded.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
 

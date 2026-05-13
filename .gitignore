@@ -1,0 +1,38 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Xcode
+*.xcuserstate
+xcuserdata/
+DerivedData/
+*.moved-aside
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# Swift Package Manager
+.build/
+.swiftpm/
+
+# CocoaPods
+Pods/
+
+# Backup CSVs（リポジトリに含めない）
+gunpla_catalog_backup*.csv
+gunpla_catalog_before_*.csv
+gunpla_catalog_backup_browser.csv
+
+# Python
+__pycache__/
+*.py[cod]
+venv/
+*.egg-info/
+.env
+
+# Large data files（収集元の生データ）
+gunpla_db.html
+hobbysearch_gunpla_db.json
+verification_log.csv

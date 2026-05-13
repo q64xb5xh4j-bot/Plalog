@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_pralog-sync._tcp</string>
+		<string>_pralog-sync._udp</string>
+	</array>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>remote-notification</string>
+	</array>
+	<key>NSCameraUsageDescription</key>
+	<string>Box Artの撮影やバーコードスキャンのためにカメラを使用します。</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Box Artの保存や読み込みのためにフォトライブラリを使用します。</string>
+</dict>
+</plist>

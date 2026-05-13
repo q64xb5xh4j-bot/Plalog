@@ -11,7 +11,7 @@ enum AppTheme: String, CaseIterable, Identifiable {
         switch self {
         case .blue:   return Color(red: 0.0, green: 0.5, blue: 1.0)
         case .red:    return Color(red: 1.0, green: 0.2, blue: 0.2)
-        case .green:  return Color(red: 0.0, green: 1.0, blue: 0.4)
+        case .green:  return Color(red: 0.1, green: 0.8, blue: 0.3)
         case .white:  return Color.primary
         case .orange: return Color(red: 1.0, green: 0.5, blue: 0.0)
         }

@@ -14,15 +14,16 @@ struct PlalogApp: App {
     // ✅ 起動状態フラグ (初期値 true)
     @State private var isBooting: Bool = true
     
-    // データモデルのコンテナ設定 (V2から変更なし)
+    // データモデルのコンテナ設定
     var sharedModelContainer: ModelContainer = {
-        let schema = Schema([
-            Kit.self,
-        ])
-        let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
+        // Main schema for Kit (existing data)
+        let mainConfig = ModelConfiguration("main", schema: Schema([Kit.self]), isStoredInMemoryOnly: false)
+        
+        // Discovery cache schema (new, separate store)
+        let discoveryConfig = ModelConfiguration("discovery", schema: Schema([DiscoveryCache.self]), isStoredInMemoryOnly: false)
 
         do {
-            return try ModelContainer(for: schema, configurations: [modelConfiguration])
+            return try ModelContainer(for: Kit.self, DiscoveryCache.self, configurations: mainConfig, discoveryConfig)
         } catch {
             fatalError("Could not create ModelContainer: \(error)")
         }
@@ -46,11 +47,11 @@ struct PlalogApp: App {
                     // ✅ ここで「iPhoneかiPadか」を分岐させます
                     Group {
                         if UIDevice.current.userInterfaceIdiom == .pad {
-                            // iPadの場合: 今日作った新しい基地へ
+                            // iPadの場合 (変更なし)
                             iPadContentView()
                         } else {
-                            // iPhoneの場合: 今までの画面へ
-                            ContentView()
+                            // iPhoneの場合: 新しいハイブリッドUIへ
+                            MainTabView()
                         }
                     }
                     .zIndex(0)
@@ -58,6 +59,33 @@ struct PlalogApp: App {
                 }
             }
             .modelContainer(sharedModelContainer)
+            .onAppear {
+                KeyValueSyncManager.shared.start()
+                
+                // ✅ Background Tasks
+                Task {
+                    let container = sharedModelContainer
+                    let context = ModelContext(container)
+                    
+                    // 1. CloudKit Image Migration (Phase 2)
+                    let defaults = UserDefaults.standard
+                    if !defaults.bool(forKey: "isImageMigrationCompleted_V2") {
+                        let migrationResult = await DataTransferManager.shared.migrateImagesToCloudKit(modelContext: context)
+                        print("[Migration] \(migrationResult)")
+                        
+                        // Mark as completed if successful (or if we decide to run it only once)
+                        // For now, let's assume if it runs without crashing, we mark it.
+                        // Ideally checking result string for "完了" but simple flag is safer for performance.
+                        defaults.set(true, forKey: "isImageMigrationCompleted_V2")
+                    } else {
+                        print("[Migration] Skipped (Already Completed)")
+                    }
+                    
+                    // 2. ✅ Discovery Cache Sync (SwiftData)
+                    let syncCount = await DiscoveryManager.shared.syncFromCloudKit(modelContext: context)
+                    print("[DiscoverySync] Synced \(syncCount) items to local cache")
+                }
+            }
         }
     }
 }

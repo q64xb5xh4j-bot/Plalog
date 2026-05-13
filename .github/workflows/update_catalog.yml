@@ -58,28 +58,31 @@ jobs:
             git diff --stat gunpla_catalog.csv kotobukiya_models.csv tamiya_military.csv hasegawa_aircraft.csv 2>/dev/null || true
           fi
 
-      - name: Create Release (if changed)
+      - name: Create Release with Assets (if changed)
         if: steps.changes.outputs.changed == 'true'
-        uses: actions/create-release@v1
+        uses: softprops/action-gh-release@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tag_name: catalog-${{ github.run_number }}-${{ github.run_id }}
-          release_name: Catalog Update - ${{ github.run_number }}
+          name: Catalog Update - ${{ github.run_number }}
           body: |
-            Automated gunpla catalog update
+            Automated model catalog update
+
+            **Files included:**
+            - gunpla_catalog.csv - Gundam Plastic Models from Bandai (Wikipedia + normalized)
+            - kotobukiya_models.csv - Kotobukiya models
+            - tamiya_military.csv - Tamiya military miniatures
+            - hasegawa_aircraft.csv - Hasegawa aircraft models
 
             Generated at: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           draft: false
           prerelease: false
-
-      - name: Upload catalog artifact
-        if: steps.changes.outputs.changed == 'true'
-        uses: actions/upload-artifact@v4
-        with:
-          name: gunpla_catalog
-          path: gunpla_catalog.csv
-          retention-days: 90
+          files: |
+            gunpla_catalog.csv
+            kotobukiya_models.csv
+            tamiya_military.csv
+            hasegawa_aircraft.csv
 
       - name: Commit changes (if changed)
         if: steps.changes.outputs.changed == 'true'

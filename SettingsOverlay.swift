@@ -8,6 +8,7 @@
 // 3. 全文差し替え・分割送付ルール適用
 
 import SwiftUI
+import StoreKit
 import SwiftData
 import UniformTypeIdentifiers
 import UIKit
@@ -21,10 +22,12 @@ struct SettingsOverlay: View {
     @Query private var allKits: [Kit]
     @ObservedObject private var themeManager = ThemeManager.shared
     @ObservedObject private var storeManager = StoreKitManager.shared
+    @ObservedObject private var langManager = LanguageManager.shared
     
     // ✅ GOD MODE Settings
-    @AppStorage("googleApiKey") private var googleApiKey: String = ""
-    @AppStorage("googleSearchEngineId") private var googleSearchEngineId: String = ""
+    // ✅ GOD MODE Settings (Moved to Keychain)
+    @State private var googleApiKey: String = ""
+    @State private var googleSearchEngineId: String = ""
     @AppStorage("isGodModeEnabled") private var isGodModeEnabled: Bool = false
     
     // UI Flags
@@ -33,10 +36,16 @@ struct SettingsOverlay: View {
     @State private var showMissingImages = false
     @State private var importMessage: String = ""
     @State private var showImportAlert: Bool = false
+    @State private var showP2PSync = false
     
     // ✅ Export State (Folder URL)
     @State private var exportFolderURL: URL?
     @State private var isExportReady: Bool = false
+    
+    // ✅ Cloud Storage Settings
+    @AppStorage("useCloudStorage") private var useCloudStorage: Bool = false
+    @State private var showMigrationConfirm: Bool = false
+    @State private var migrationStatus: String = ""
     
     // Purchase
     @State private var showPurchaseOverlay = false
@@ -88,6 +97,12 @@ struct SettingsOverlay: View {
                     .transition(.move(edge: .trailing))
                     .zIndex(20)
             }
+            
+            if showP2PSync {
+                P2PSyncView(isPresented: $showP2PSync)
+                    .transition(.opacity)
+                    .zIndex(30)
+            }
         }
         // MARK: - Modifiers
         .fileImporter(
@@ -120,6 +135,18 @@ struct SettingsOverlay: View {
         } message: {
             Text("ITEM MANAGEMENTが開けない場合の緊急リセットです。本当によろしいですか？")
         }
+        .alert("クラウド移行", isPresented: $showMigrationConfirm) {
+            Button("キャンセル", role: .cancel) { }
+            Button("実行", role: .destructive) {
+                Task {
+                    let log = await DataTransferManager.shared.migrateImagesToAlbum(modelContext: modelContext)
+                    importMessage = log
+                    showImportAlert = true
+                }
+            }
+        } message: {
+            Text("アプリ内の画像を「PLALOG」アルバムにコピーし、ローカルファイルを削除します。よろしいですか？\n※この操作は取り消せません")
+        }
         .overlay {
             if showPurchaseOverlay {
                 PurchaseOverlay(isPresented: $showPurchaseOverlay)
@@ -127,6 +154,15 @@ struct SettingsOverlay: View {
         }
         .onAppear {
             prepareBackupData()
+            // Load keys from Keychain
+            googleApiKey = KeychainHelper.shared.read(service: "com.hiro.pralog", account: "googleApiKey") ?? ""
+            googleSearchEngineId = KeychainHelper.shared.read(service: "com.hiro.pralog", account: "googleSearchEngineId") ?? ""
+        }
+        .onChange(of: googleApiKey) {
+            KeychainHelper.shared.save(googleApiKey, service: "com.hiro.pralog", account: "googleApiKey")
+        }
+        .onChange(of: googleSearchEngineId) {
+            KeychainHelper.shared.save(googleSearchEngineId, service: "com.hiro.pralog", account: "googleSearchEngineId")
         }
         .onChange(of: allKits.count) { _, _ in
             prepareBackupData()
@@ -140,9 +176,17 @@ struct SettingsOverlay: View {
             
             ScrollView {
                 VStack(spacing: 24) {
+                    languageSection
+                    Divider().background(Color.white.opacity(0.2))
                     themeSection
                     Divider().background(Color.white.opacity(0.2))
-                    databaseSection
+                    libraryManagementSection
+                    Divider().background(Color.white.opacity(0.2))
+                    cloudStorageSection // ✅ NEW
+                    Divider().background(Color.white.opacity(0.2))
+                    syncBackupSection
+                    Divider().background(Color.white.opacity(0.2))
+                    databaseStoreSection // ✅ NEW
                     Divider().background(Color.white.opacity(0.2))
                     godModeSection
                     Divider().background(Color.white.opacity(0.2))
@@ -177,7 +221,7 @@ extension SettingsOverlay {
                 .frame(width: 24, height: 24)
                 .foregroundStyle(themeManager.currentTheme.mainColor)
             
-            Text("SYSTEM TERMINAL")
+            Text(langManager.t(.settings_title))
                 .font(.system(size: 20, weight: .bold, design: .monospaced))
                 .foregroundStyle(.white)
             Spacer()
@@ -195,7 +239,7 @@ extension SettingsOverlay {
     
     private var themeSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            sectionHeader("THEME COLOR")
+            sectionHeader(langManager.t(.settings_theme))
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 16) {
                     ForEach(AppTheme.allCases) { theme in
@@ -209,15 +253,53 @@ extension SettingsOverlay {
         .padding(.horizontal)
     }
     
-    private var databaseSection: some View {
+    private var languageSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            sectionHeader("DATABASE OPERATIONS")
+            sectionHeader(langManager.t(.settings_language))
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 12) {
+                    ForEach(AppLanguage.allCases) { lang in
+                        Button {
+                            LocalHaptics.select()
+                            withAnimation {
+                                langManager.currentLanguage = lang
+                            }
+                        } label: {
+                            HStack {
+                                Text(lang.flag)
+                                Text(lang.displayName)
+                                    .font(.system(size: 12, weight: .bold, design: .monospaced))
+                            }
+                            .padding(.vertical, 8)
+                            .padding(.horizontal, 12)
+                            .background(langManager.currentLanguage == lang ? themeManager.currentTheme.mainColor : Color.white.opacity(0.1))
+                            .foregroundStyle(langManager.currentLanguage == lang ? Color.black : Color.white)
+                            .cornerRadius(8)
+                            .overlay(RoundedRectangle(cornerRadius: 8).stroke(themeManager.currentTheme.mainColor, lineWidth: langManager.currentLanguage == lang ? 0 : 1))
+                        }
+                    }
+                }
+                .padding(.horizontal, 4)
+                .padding(.vertical, 10)
+            }
+            
+            Text(langManager.t(.settings_language_note))
+                .font(.caption2.monospaced())
+                .foregroundStyle(.gray)
+                .padding(.horizontal, 4)
+        }
+        .padding(.horizontal)
+    }
+    
+    private var libraryManagementSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            sectionHeader("LIBRARY MANAGEMENT")
             
             HStack(spacing: 8) {
                 SettingsRow(
                     icon: "list.bullet.rectangle.portrait",
-                    label: "ITEM MANAGEMENT",
-                    subLabel: itemManagementSubLabel,
+                    label: langManager.t(.lib_manage_title),
+                    subLabel: langManager.t(.lib_manage_desc),
                     isLocked: false,
                     action: {
                         LocalHaptics.tap()
@@ -233,7 +315,7 @@ extension SettingsOverlay {
                         Image(systemName: "trash.fill")
                             .font(.system(size: 20))
                             .foregroundStyle(.white)
-                        Text("RESET")
+                        Text(langManager.t(.lib_reset_btn))
                             .font(.system(size: 8, weight: .bold))
                             .foregroundStyle(.white)
                     }
@@ -244,9 +326,51 @@ extension SettingsOverlay {
             }
             
             SettingsRow(
+                icon: "photo.badge.plus",
+                label: langManager.t(.lib_missing_title),
+                subLabel: "\(langManager.t(.lib_missing_desc_pre))\(missingBoxArtCount)\(langManager.t(.lib_missing_desc_post))\(missingPhotoCount)",
+                isLocked: !storeManager.isCommander,
+                action: {
+                    checkCommanderAccess { showMissingImages = true }
+                }
+            )
+            
+            SettingsRow(
+                icon: "wrench.and.screwdriver.fill",
+                label: langManager.t(.lib_repair_title),
+                subLabel: langManager.t(.lib_repair_desc),
+                isLocked: false,
+                action: {
+                    LocalHaptics.select()
+                    maintenanceMessage = "画像を検証中...\n(ライブラリのサイズにより数分かかる場合があります)"
+                    showMaintenanceAlert = true
+                    
+                    // Fetch data on Main Actor
+                    let descriptor = FetchDescriptor<Kit>()
+                    let kits = (try? modelContext.fetch(descriptor)) ?? []
+                    var kitData: [(image: String?, completed: String?)] = []
+                    for kit in kits {
+                        kitData.append((image: kit.imageURLString, completed: kit.completedImageURLString))
+                        // Include Build Log Images
+                        for log in (kit.buildLogs ?? []) {
+                            kitData.append((image: log.imagePath, completed: nil))
+                        }
+                    }
+                    
+                    Task {
+                        // Run heavy task in background
+                        let result = await DataTransferManager.shared.repairBrokenImages(kitData: kitData)
+                        await MainActor.run {
+                            maintenanceMessage = result
+                        }
+                    }
+                }
+            )
+            
+            SettingsRow(
                 icon: "externaldrive.badge.minus",
-                label: "STORAGE MAINTENANCE",
-                subLabel: "不要な画像ファイルを削除",
+                label: langManager.t(.lib_storage_title),
+                subLabel: langManager.t(.lib_storage_desc),
                 isLocked: false,
                 action: {
                     LocalHaptics.select()
@@ -254,23 +378,82 @@ extension SettingsOverlay {
                     showMaintenanceAlert = true
                 }
             )
+        }
+        .padding(.horizontal)
+    }
+    
+    private var cloudStorageSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            sectionHeader("CLOUD STORAGE (iCloud)")
             
+            Toggle(isOn: $useCloudStorage) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(langManager.t(.cloud_low_data)).font(.system(size: 16, weight: .medium, design: .monospaced))
+                    Text(langManager.t(.cloud_low_data_desc)).font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            .tint(themeManager.currentTheme.mainColor)
+            .padding()
+            .background(Color(UIColor.secondarySystemBackground))
+            .cornerRadius(12)
+            
+            if useCloudStorage {
+                SettingsRow(
+                    icon: "arrow.up.doc.on.clipboard",
+                    label: langManager.t(.cloud_migrate_title),
+                    subLabel: langManager.t(.cloud_migrate_desc),
+                    isLocked: false,
+                    action: {
+                        LocalHaptics.select()
+                        showMigrationConfirm = true
+                    }
+                )
+                
+                // ✅ Manual Image Migration Trigger
+                SettingsRow(
+                    icon: "photo.badge.arrow.down",
+                    label: "MIGRATE IMAGES",
+                    subLabel: "Convert local images to CloudKit",
+                    isLocked: false,
+                    action: {
+                        LocalHaptics.select()
+                        maintenanceMessage = "Migration Started..."
+                        showMaintenanceAlert = true
+                        Task {
+                            let result = await DataTransferManager.shared.migrateImagesToCloudKit(modelContext: modelContext)
+                            await MainActor.run { 
+                                maintenanceMessage = result
+                                showMaintenanceAlert = true
+                            }
+                        }
+                    }
+                )
+            }
+        }
+        .padding(.horizontal)
+    }
+    
+    private var syncBackupSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            sectionHeader("SYNC & BACKUP")
+            
+            // ✅ DIRECT SYNC (NEW)
             SettingsRow(
-                icon: "photo.badge.plus",
-                label: "MISSING LINKS",
-                subLabel: "未取得画像: BOX \(missingBoxArtCount) / COMPLETE \(missingPhotoCount)",
-                isLocked: !storeManager.isCommander,
+                icon: "arrow.triangle.2.circlepath",
+                label: langManager.t(.sync_direct_title),
+                subLabel: langManager.t(.sync_direct_desc),
+                isLocked: false,
                 action: {
-                    checkCommanderAccess { showMissingImages = true }
+                    LocalHaptics.select()
+                    withAnimation { showP2PSync = true }
                 }
             )
             
-            // ✅ EXPORT ROW: デザイン完全一致 + 透明ShareLinkオーバーレイ (フォルダ出力版)
             ZStack {
                 SettingsRow(
                     icon: "square.and.arrow.up",
-                    label: "DATA EXPORT (BACKUP)",
-                    subLabel: "画像込みの完全バックアップを出力",
+                    label: langManager.t(.sync_export_title),
+                    subLabel: langManager.t(.sync_export_desc),
                     isLocked: false,
                     action: { }
                 )
@@ -285,8 +468,8 @@ extension SettingsOverlay {
             
             SettingsRow(
                 icon: "square.and.arrow.down",
-                label: "DATA IMPORT (RESTORE)",
-                subLabel: "バックアップ内の全ファイルを選択",
+                label: langManager.t(.sync_import_title),
+                subLabel: langManager.t(.sync_import_desc),
                 isLocked: !storeManager.isCommander,
                 action: {
                     checkCommanderAccess { showFileImport = true }
@@ -313,14 +496,14 @@ extension SettingsOverlay {
     
     private var godModeSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            sectionHeader("GOD MODE (GOOGLE API)")
+            sectionHeader(langManager.t(.settings_godmode))
             
-            VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 4) {
                 Toggle(isOn: $isGodModeEnabled) {
                     HStack {
                         Image(systemName: "bolt.fill")
                             .foregroundStyle(isGodModeEnabled ? .yellow : .gray)
-                        Text(isGodModeEnabled ? "GOD MODE: ACTIVE" : "GOD MODE: INACTIVE")
+                        Text(isGodModeEnabled ? langManager.t(.god_active) : langManager.t(.god_inactive))
                             .fontWeight(.bold)
                             .foregroundStyle(isGodModeEnabled ? themeManager.currentTheme.mainColor : .secondary)
                     }
@@ -336,11 +519,11 @@ extension SettingsOverlay {
                         .frame(maxWidth: .infinity, alignment: .leading)
                     
                     if !isGodModeEnabled {
-                        Text("スイッチをONにして機能を有効化してください。")
+                        Text(langManager.t(.god_enable_guide))
                             .font(.caption2).foregroundStyle(.gray)
                     }
                 } else {
-                    Text("SYSTEM LOCKED: 有効化するにはAPI KEYとENGINE IDの両方を入力してください。")
+                    Text(langManager.t(.god_locked_guide))
                         .font(.caption)
                         .foregroundStyle(.red.opacity(0.8))
                         .fontWeight(.bold)
@@ -349,7 +532,7 @@ extension SettingsOverlay {
                 Divider().background(Color.white.opacity(0.2))
                 
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("API KEY")
+                    Text(langManager.t(.god_api_key))
                         .font(.caption).fontWeight(.bold)
                         .foregroundStyle(themeManager.currentTheme.mainColor)
                         .padding(.leading, 4)
@@ -359,7 +542,7 @@ extension SettingsOverlay {
                             .foregroundStyle(googleApiKey.isEmpty ? .gray : themeManager.currentTheme.mainColor)
                             .frame(width: 20)
                         
-                        SecureField("", text: $googleApiKey, prompt: Text("ENTER API KEY...").foregroundStyle(.gray))
+                        SecureField("", text: $googleApiKey, prompt: Text(langManager.t(.god_enter_key)).foregroundStyle(.gray))
                             .font(.system(.body, design: .monospaced))
                             .foregroundStyle(Color.primary)
                         
@@ -379,7 +562,7 @@ extension SettingsOverlay {
                 }
                 
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("SEARCH ENGINE ID (CX)")
+                    Text(langManager.t(.god_engine_id))
                         .font(.caption).fontWeight(.bold)
                         .foregroundStyle(themeManager.currentTheme.mainColor)
                         .padding(.leading, 4)
@@ -389,7 +572,7 @@ extension SettingsOverlay {
                             .foregroundStyle(googleSearchEngineId.isEmpty ? .gray : themeManager.currentTheme.mainColor)
                             .frame(width: 20)
                         
-                        SecureField("", text: $googleSearchEngineId, prompt: Text("ENTER ENGINE ID...").foregroundStyle(.gray))
+                        SecureField("", text: $googleSearchEngineId, prompt: Text(langManager.t(.god_enter_id)).foregroundStyle(.gray))
                             .font(.system(.body, design: .monospaced))
                             .foregroundStyle(Color.primary)
                         
@@ -416,6 +599,148 @@ extension SettingsOverlay {
         }
         .padding(.horizontal)
     }
+    
+    // Database Logic Helper
+    private func toggleDatabase(key: String, enabled: Bool) {
+        // Haptic
+        if enabled { LocalHaptics.success() } else { LocalHaptics.select() }
+        
+        // Update UserDefaults
+        UserDefaults.standard.set(enabled, forKey: key)
+        
+        // Reload Data
+        DispatchQueue.global(qos: .userInitiated).async {
+            CSVDataManager.shared.reloadAll()
+        }
+    }
+    
+    private var databaseStoreSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            sectionHeader(langManager.t(.settings_dbstore))
+            
+            // TAMIYA
+            DatabaseRow(
+                id: "com.hiro.pralog.db.tamiya",
+                title: "MILITARY (TAMIYA)",
+                desc: langManager.t(.db_military_desc),
+                icon: "shield.fill",
+                color: Color(red: 0.8, green: 0.2, blue: 0.2) // Tamiya Red
+            )
+            
+            // AOSHIMA
+            DatabaseRow(
+                id: "com.hiro.pralog.db.aoshima",
+                title: "CARS (AOSHIMA)",
+                desc: langManager.t(.db_car_desc),
+                icon: "car.fill",
+                color: .blue
+            )
+            
+            // KOTOBUKIYA
+            DatabaseRow(
+                id: "com.hiro.pralog.db.kotobukiya",
+                title: "CHARACTER (KOTOBUKIYA)",
+                desc: "Frame Arms Girl, Megami Device",
+                icon: "figure.walk",
+                color: .green
+            )
+            
+            // HASEGAWA
+            DatabaseRow(
+                id: "com.hiro.pralog.db.hasegawa",
+                title: "AIRCRAFT (HASEGAWA)",
+                desc: "Detailed aircraft kits",
+                icon: "airplane",
+                color: .yellow
+            )
+            
+            // FUJIMI
+            DatabaseRow(
+                id: "com.hiro.pralog.db.fujimi",
+                title: "MODELS (FUJIMI)",
+                desc: "Ships & Cars",
+                icon: "ferry.fill",
+                color: .cyan
+            )
+            
+            // FINE MOLDS
+            DatabaseRow(
+                id: "com.hiro.pralog.db.finemolds",
+                title: "FINE MOLDS",
+                desc: "Ghibli & Military",
+                icon: "star.fill",
+                color: .orange
+            )
+            
+            // MAX FACTORY
+            DatabaseRow(
+                id: "com.hiro.pralog.db.maxfactory",
+                title: "DOUGRAM (MAX FACTORY)",
+                desc: "Combat Armors MAX",
+                icon: "circle.grid.hex.fill",
+                color: .purple
+            )
+            
+            // VOLKS
+            DatabaseRow(
+                id: "com.hiro.pralog.db.volks",
+                title: "MODELS (VOLKS)",
+                desc: "IMS (FSS), SWS",
+                icon: "v.circle.fill",
+                color: .black
+            )
+        }
+        .padding(.horizontal)
+    }
+    
+    // Generic Database Row (Toggle)
+    struct DatabaseRow: View {
+        let id: String
+        let title: String
+        let desc: String
+        let icon: String
+        let color: Color
+        
+        @AppStorage var isEnabled: Bool
+        
+        init(id: String, title: String, desc: String, icon: String, color: Color) {
+            self.id = id
+            self.title = title
+            self.desc = desc
+            self.icon = icon
+            self.color = color
+            self._isEnabled = AppStorage(wrappedValue: false, id)
+        }
+        
+        var body: some View {
+            Toggle(isOn: $isEnabled) {
+                HStack(spacing: 12) {
+                    ZStack {
+                        Circle().fill(color.opacity(0.1))
+                        Image(systemName: icon).foregroundStyle(color)
+                    }.frame(width: 40, height: 40)
+                    
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(title).font(.system(size: 14, weight: .bold))
+                        Text(desc).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .tint(ThemeManager.shared.currentTheme.mainColor)
+            .padding(12)
+            .background(Color(UIColor.secondarySystemBackground))
+            .cornerRadius(12)
+            .onChange(of: isEnabled) { _, newValue in
+                // Trigger Reload
+                if newValue { LocalHaptics.success() } else { LocalHaptics.select() }
+                DispatchQueue.global(qos: .userInitiated).async {
+                    CSVDataManager.shared.reloadAll()
+                }
+            }
+        }
+    }
+
+
     
     private var systemInfoSection: some View {
         VStack(alignment: .leading, spacing: 12) {

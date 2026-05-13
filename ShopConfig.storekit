@@ -45,6 +45,123 @@
       ],
       "productID" : "com.pralog.upgrade",
       "referenceName" : "Upgrade Add-on",
+    },
+    {
+      "displayPrice" : "500",
+      "familyShareable" : false,
+      "internalID" : "3A6B0A11",
+      "localizations" : [
+        {
+          "description" : "タミヤ製ミリタリーモデルのデータベース",
+          "displayName" : "ミリタリーモデルDB (Tamiya)",
+          "locale" : "ja"
+        }
+      ],
+      "productID" : "com.hiro.pralog.db.tamiya",
+      "referenceName" : "Available DB: Tamiya Military",
+      "type" : "NonConsumable"
+    },
+    {
+      "displayPrice" : "500",
+      "familyShareable" : false,
+      "internalID" : "4B7C1B22",
+      "localizations" : [
+        {
+          "description" : "アオシマ製カーモデルのデータベース",
+          "displayName" : "カーモデルDB (Aoshima)",
+          "locale" : "ja"
+        }
+      ],
+      "productID" : "com.hiro.pralog.db.aoshima",
+      "referenceName" : "Available DB: Aoshima Cars",
+      "type" : "NonConsumable"
+    },
+    {
+      "displayPrice" : "500",
+      "familyShareable" : false,
+      "internalID" : "5C8D2C33",
+      "localizations" : [
+        {
+          "description" : "ハセガワ製航空機モデルのデータベース",
+          "displayName" : "航空機モデルDB (Hasegawa)",
+          "locale" : "ja"
+        }
+      ],
+      "productID" : "com.hiro.pralog.db.hasegawa",
+      "referenceName" : "Available DB: Hasegawa Aircraft",
+      "type" : "NonConsumable"
+    },
+    {
+      "displayPrice" : "500",
+      "familyShareable" : false,
+      "internalID" : "6D9E3D44",
+      "localizations" : [
+        {
+          "description" : "コトブキヤ製キャラクターモデルDB",
+          "displayName" : "KOTOBUKIYA DB",
+          "locale" : "ja"
+        }
+      ],
+      "productID" : "com.hiro.pralog.db.kotobukiya",
+      "referenceName" : "Available DB: Kotobukiya",
+      "type" : "NonConsumable"
+    },
+    {
+      "displayPrice" : "500",
+      "familyShareable" : false,
+      "internalID" : "7E0F4E55",
+      "localizations" : [
+        {
+          "description" : "フジミ模型 艦船・車モデルDB",
+          "displayName" : "FUJIMI DB",
+          "locale" : "ja"
+        }
+      ],
+      "productID" : "com.hiro.pralog.db.fujimi",
+      "referenceName" : "Available DB: Fujimi",
+      "type" : "NonConsumable"
+    },
+    {
+      "displayPrice" : "500",
+      "familyShareable" : false,
+      "internalID" : "8F1G5F66",
+      "localizations" : [
+        {
+          "description" : "ファインモールド製モデルDB",
+          "displayName" : "FINE MOLDS DB",
+          "locale" : "ja"
+        }
+      ],
+      "productID" : "com.hiro.pralog.db.finemolds",
+      "referenceName" : "Available DB: Fine Molds",
+    },
+    {
+      "displayPrice" : "500",
+      "familyShareable" : false,
+      "internalID" : "9G2H6G77",
+      "localizations" : [
+        {
+          "description" : "マックスファクトリー製ダグラム・モデルDB",
+          "displayName" : "DOUGRAM DB (MAX FACTORY)",
+          "locale" : "ja"
+        }
+      ],
+      "productID" : "com.hiro.pralog.db.maxfactory",
+      "referenceName" : "Available DB: Max Factory",
+    },
+    {
+      "displayPrice" : "500",
+      "familyShareable" : false,
+      "internalID" : "0I3J7H88",
+      "localizations" : [
+        {
+          "description" : "ボークス製モデルDB (IMS, SWS)",
+          "displayName" : "VOLKS DB",
+          "locale" : "ja"
+        }
+      ],
+      "productID" : "com.hiro.pralog.db.volks",
+      "referenceName" : "Available DB: Volks",
       "type" : "NonConsumable"
     }
   ],

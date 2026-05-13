@@ -33,15 +33,30 @@ final class StoreKitManager: ObservableObject {
     // ✅ 商品リスト (UI表示用)
     @Published var products: [Product] = []
     
-    // 定数: 商品ID (Configuration.storekitと一致させる)
+    // Base Products
     private let productID_Standard = "com.pralog.standard"
     private let productID_Commander = "com.pralog.commander"
     private let productID_Upgrade = "com.pralog.upgrade"
     
-    // 商品IDセット
+    // Database Products
+    private let productID_DB_Tamiya = "com.hiro.pralog.db.tamiya"
+    private let productID_DB_Aoshima = "com.hiro.pralog.db.aoshima"
+    private let productID_DB_Hasegawa = "com.hiro.pralog.db.hasegawa"
+    private let productID_DB_Kotobukiya = "com.hiro.pralog.db.kotobukiya"
+    private let productID_DB_Fujimi = "com.hiro.pralog.db.fujimi"
+    private let productID_DB_FineMolds = "com.hiro.pralog.db.finemolds"
+    private let productID_DB_MaxFactory = "com.hiro.pralog.db.maxfactory"
+    private let productID_DB_Volks = "com.hiro.pralog.db.volks"
+    
+    // 商品IDセット (DBは無料化につき削除)
     private var productIDs: Set<String> {
-        [productID_Standard, productID_Commander, productID_Upgrade]
+        [
+            productID_Standard, productID_Commander, productID_Upgrade
+        ]
     }
+    
+    // ✅ 購入済みデータベース管理 (CatalogGenreとのマッピング用)
+    @Published var purchasedDatabases: Set<String> = []
     
     private var updateListenerTask: Task<Void, Never>? = nil
     
@@ -67,6 +82,19 @@ final class StoreKitManager: ObservableObject {
         } catch {
             print("Failed to fetch products: \(error)")
         }
+    }
+    
+    // MARK: - Check Status
+    
+    func isPurchased(_ productID: String) -> Bool {
+        // ✅ GOD MODE: All Access
+        if UserDefaults.standard.bool(forKey: "isGodModeEnabled") { return true }
+        
+        // ✅ データベースは全無料化
+        if productID.contains(".db.") { return true }
+        if productID == "gunpla" { return true }
+        
+        return purchasedDatabases.contains(productID)
     }
     
     // MARK: - Purchase Actions
@@ -100,26 +128,27 @@ final class StoreKitManager: ObservableObject {
     func updateCustomerProductStatus() async {
         var newIsPremium = false
         var newIsCommander = false
+        var newPurchasedDBs: Set<String> = []
         
         // 購入済み権利(Entitlements)を走査
         for await result in Transaction.currentEntitlements {
             if let transaction = try? checkVerified(result) {
                 switch transaction.productID {
                 case productID_Standard:
-                    // スタンダード: 基本機能のみON
                     newIsPremium = true
-                    
                 case productID_Commander:
-                    // コマンダー: 両方ON
                     newIsPremium = true
                     newIsCommander = true
-                    
                 case productID_Upgrade:
-                    // アップグレード: 拡張機能ON
                     newIsCommander = true
+                    
+                case productID_DB_Tamiya, productID_DB_Aoshima, productID_DB_Hasegawa,
+                     productID_DB_Kotobukiya, productID_DB_Fujimi, productID_DB_FineMolds,
+                     productID_DB_MaxFactory, productID_DB_Volks:
+                    newPurchasedDBs.insert(transaction.productID)
                     
                 default:
-                    // 旧ID互換性などを考慮する場合はここに追記
+                    // 旧ID互換性などを考慮
                     if transaction.productID == "jp.plalog.Plalog.premium_unlock" {
                         newIsPremium = true
                     }
@@ -133,6 +162,7 @@ final class StoreKitManager: ObservableObject {
         
         self.isPremium = newIsPremium
         self.isCommander = newIsCommander
+        self.purchasedDatabases = newPurchasedDBs
     }
     
     private func listenForTransactions() -> Task<Void, Never> {

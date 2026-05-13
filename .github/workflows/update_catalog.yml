@@ -38,7 +38,7 @@ jobs:
           echo "🚀 Starting catalog update..."
           echo "📊 Gunpla (Bandai)..."
           python scrape_gunpla.py
-          python fill_jan_hobbysearch.py
+          # SKIPPED: fill_jan_hobbysearch.py - HobbySearch rate limiting causes timeouts
           python normalize_series.py
           echo "📊 Other manufacturers (Kotobukiya, Tamiya, Hasegawa)..."
           python scrape_hobbysearch_all.py

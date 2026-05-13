@@ -1,0 +1,91 @@
+name: Update Gunpla Catalog
+
+on:
+  schedule:
+    # Every Monday at 3:00 AM UTC (11:00 AM JST)
+    - cron: '0 3 * * 1'
+  workflow_dispatch: # Allow manual trigger
+
+permissions:
+  contents: write
+  deployments: write
+
+jobs:
+  update-catalog:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        working-directory: ./scripts
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run catalog update
+        working-directory: ./scripts
+        run: |
+          echo "🚀 Starting catalog update..."
+          python scrape_gunpla.py
+          python fill_jan_hobbysearch.py
+          python normalize_series.py
+          echo "✅ Catalog update complete"
+
+      - name: Check for changes
+        id: changes
+        run: |
+          if git diff --quiet gunpla_catalog.csv; then
+            echo "changed=false" >> $GITHUB_OUTPUT
+            echo "ℹ️ No changes to catalog"
+          else
+            echo "changed=true" >> $GITHUB_OUTPUT
+            echo "📊 Catalog updated"
+            git diff --stat gunpla_catalog.csv
+          fi
+
+      - name: Create Release (if changed)
+        if: steps.changes.outputs.changed == 'true'
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: catalog-${{ github.run_number }}-${{ github.run_id }}
+          release_name: Catalog Update - ${{ github.run_number }}
+          body: |
+            Automated gunpla catalog update
+
+            Generated at: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          draft: false
+          prerelease: false
+
+      - name: Upload catalog artifact
+        if: steps.changes.outputs.changed == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: gunpla_catalog
+          path: gunpla_catalog.csv
+          retention-days: 90
+
+      - name: Commit changes (if changed)
+        if: steps.changes.outputs.changed == 'true'
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add gunpla_catalog.csv
+          git commit -m "chore: update gunpla catalog - $(date +'%Y-%m-%d')"
+          git push
+
+      - name: Notify (no changes)
+        if: steps.changes.outputs.changed == 'false'
+        run: |
+          echo "✅ Catalog check completed - no updates needed"

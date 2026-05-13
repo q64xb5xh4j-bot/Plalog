@@ -1,4 +1,4 @@
-name: Update Gunpla Catalog
+name: Update Model Catalogs
 
 on:
   schedule:
@@ -36,21 +36,26 @@ jobs:
         working-directory: ./scripts
         run: |
           echo "🚀 Starting catalog update..."
+          echo "📊 Gunpla (Bandai)..."
           python scrape_gunpla.py
           python fill_jan_hobbysearch.py
           python normalize_series.py
+          echo "📊 Other manufacturers (Kotobukiya, Tamiya, Hasegawa)..."
+          python scrape_hobbysearch_all.py
           echo "✅ Catalog update complete"
 
       - name: Check for changes
         id: changes
         run: |
-          if git diff --quiet gunpla_catalog.csv; then
+          if git diff --quiet gunpla_catalog.csv kotobukiya_models.csv tamiya_military.csv hasegawa_aircraft.csv; then
             echo "changed=false" >> $GITHUB_OUTPUT
-            echo "ℹ️ No changes to catalog"
+            echo "ℹ️ No changes to catalogs"
           else
             echo "changed=true" >> $GITHUB_OUTPUT
-            echo "📊 Catalog updated"
-            git diff --stat gunpla_catalog.csv
+            echo "📊 Catalogs updated"
+            echo "Changed files:"
+            git diff --name-only
+            git diff --stat gunpla_catalog.csv kotobukiya_models.csv tamiya_military.csv hasegawa_aircraft.csv 2>/dev/null || true
           fi
 
       - name: Create Release (if changed)
@@ -81,8 +86,8 @@ jobs:
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          git add gunpla_catalog.csv
-          git commit -m "chore: update gunpla catalog - $(date +'%Y-%m-%d')"
+          git add gunpla_catalog.csv kotobukiya_models.csv tamiya_military.csv hasegawa_aircraft.csv
+          git commit -m "chore: update model catalogs - $(date +'%Y-%m-%d')"
           git push
 
       - name: Notify (no changes)

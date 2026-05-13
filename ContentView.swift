@@ -1,9 +1,6 @@
-// ContentView.swift V27
-// 1. バージョン管理ルールに基づき更新 (V26 -> V27)
-// 2. 修正点: iPhone横向き(Landscape)時のオーブ位置・レイアウトの根本修正
-//    - GeometryReaderがセーフエリア内にあるため、insets加算ではなく「固定マージン」で位置を確定
-//    - 横持ち時は「端から100pt」を確保し、絶対に指やノッチと被らないように変更
-//    - 縦持ち時はV24のロジックを厳密に維持
+// ContentView.swift V28
+// 1. バージョン管理ルールに基づき更新 (V27 -> V28)
+// 2. 修正点: 破損したファイル構造の修復とiPhoneスライドショーボタンの追加
 // 3. 全文差し替えルール適用
 
 import SwiftUI
@@ -30,14 +27,14 @@ struct ContentView: View {
     @State private var showMenu: Bool = false
     @State private var didStart: Bool = false
     
+    @State private var showCommanderMenu: Bool = false
+    
+    // Legacy states (kept for compatibility if referenced, but unused in main view)
     @State private var showAddFlow: Bool = false
-    @State private var showSettings: Bool = false
     @State private var editingKit: Kit? = nil
     
     // 課金画面用ステート
     @State private var showPurchaseOverlay: Bool = false
-    
-    @State private var showSettingsIcon: Bool = false
     @State private var bounceYOffset: CGFloat = 0
 
     enum MenuItem: String, Identifiable {
@@ -206,69 +203,27 @@ struct ContentView: View {
                         .onTapGesture {
                             guard phase == .home else { return }
                             Haptics.tap()
-                            if selected != nil { withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) { selected = nil } }
+                            if selected != nil { 
+                                withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) { selected = nil } 
+                            } else {
+                                // Clean state tap -> Add Flow
+                                handleAddAction()
+                            }
                         }
                         .onLongPressGesture(minimumDuration: 0.8) {
                             guard phase == .home else { return }
                             Haptics.longPress()
-                            withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) { showSettingsIcon.toggle() }
+                            withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) { showCommanderMenu = true }
                         }
                         .zIndex(20)
                 }
                 .padding(.bottom, bottomSafeArea)
                 
-                // Layer 2: Settings Icon & Stats
-                if phase == .home && !showAddFlow && editingKit == nil && showSettingsIcon {
-                    VStack {
-                        HStack(alignment: .center) {
-                            HStack(spacing: 12) {
-                                HStack(spacing: 4) {
-                                    Text("TOTAL")
-                                        .font(.system(size: 10, weight: .bold))
-                                        .foregroundStyle(themeManager.currentTheme.mainColor.opacity(0.7))
-                                    Text("\(allKits.count)")
-                                        .font(.system(size: 16, weight: .bold, design: .monospaced))
-                                        .foregroundStyle(themeManager.currentTheme.mainColor)
-                                }
-                                Rectangle()
-                                    .fill(Color.white.opacity(0.2))
-                                    .frame(width: 1, height: 16)
-                                statItem(icon: "stock", count: stockCount)
-                                statItem(icon: "inprogress", count: inProgressCount)
-                                statItem(icon: "complete", count: completeCount)
-                            }
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 8)
-                            .background(Material.ultraThinMaterial)
-                            .clipShape(Capsule())
-                            .overlay(Capsule().stroke(themeManager.currentTheme.mainColor.opacity(0.3), lineWidth: 1))
-                            .shadow(color: .black.opacity(0.2), radius: 4, x: 0, y: 2)
-                            
-                            Spacer()
-                            
-                            Button {
-                                Haptics.tap(); showSettings = true
-                                withAnimation { showSettingsIcon = false }
-                            } label: {
-                                Image("setting")
-                                    .resizable()
-                                    .renderingMode(.template)
-                                    .scaledToFit()
-                                    .frame(width: 28, height: 28)
-                                    .foregroundStyle(themeManager.currentTheme.mainColor)
-                                    .padding(16)
-                                    .background(Color(uiColor: .systemBackground).opacity(0.8))
-                                    .clipShape(Circle())
-                                    .shadow(color: Color.black.opacity(0.1), radius: 4, x: 0, y: 2)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                        .padding(.top, topSafeArea + 10).padding(.horizontal, 20)
-                        
-                        Spacer()
-                    }
-                    .zIndex(100)
-                    .transition(.opacity.animation(.easeInOut(duration: 0.2)))
+                // Layer 2: Commander Menu Overlay
+                if showCommanderMenu {
+                    CommanderMenuView(isPresented: $showCommanderMenu)
+                        .zIndex(2000)
+                        .transition(.opacity)
                 }
             
                 Color.clear
@@ -277,6 +232,7 @@ struct ContentView: View {
                     }) {
                         AddRegistrationFlowOverlay(isPresented: $showAddFlow)
                     }
+
                 
                 if showPurchaseOverlay {
                     PurchaseOverlay(isPresented: $showPurchaseOverlay)
@@ -284,12 +240,16 @@ struct ContentView: View {
                         .transition(.opacity)
                 }
                 
-                if showSettings { SettingsOverlay(isPresented: $showSettings).transition(.move(edge: .bottom)).zIndex(1000) }
                 if editingKit != nil { KitDetailOverlay(kit: $editingKit).zIndex(1001) }
             }
             .task {
                 guard !didStart else { return }
                 didStart = true
+                
+                didStart = true
+                
+
+                
                 phase = .launchHold; progress = 0; showMenu = false; selected = nil; bounceYOffset = 0
                 try? await Task.sleep(nanoseconds: UInt64(launchHold * 1_000_000_000))
                 phase = .moving
@@ -307,20 +267,9 @@ struct ContentView: View {
         .ignoresSafeArea(.keyboard)
     }
     
-    private func statItem(icon: String, count: Int) -> some View {
-        HStack(spacing: 4) {
-            Image(icon)
-                .resizable()
-                .renderingMode(.template)
-                .scaledToFit()
-                .frame(width: 14, height: 14)
-                .foregroundStyle(themeManager.currentTheme.mainColor.opacity(0.8))
-            
-            Text("\(count)")
-                .font(.system(size: 14, weight: .bold, design: .monospaced))
-                .foregroundStyle(themeManager.currentTheme.mainColor)
-        }
-    }
+
+    
+
     
     private func calculateScale(proxy: GeometryProxy, in geo: GeometryProxy) -> CGFloat {
         let midX = proxy.frame(in: .global).midX
@@ -387,95 +336,21 @@ struct ContentView: View {
     }
     
     private func lerp(from a: CGFloat, to b: CGFloat, t: CGFloat) -> CGFloat { a + (b - a) * t }
-}
-
-// MARK: - Motion Manager Class (V23追加)
-class MotionManager: ObservableObject {
-    private let manager = CMMotionManager()
-    @Published var pitch: Double = 0.0
-    @Published var roll: Double = 0.0
     
-    func startUpdates() {
-        if manager.isDeviceMotionAvailable {
-            manager.deviceMotionUpdateInterval = 1.0 / 60.0
-            manager.startDeviceMotionUpdates(to: .main) { [weak self] data, error in
-                guard let data = data else { return }
-                // 傾きデータを滑らかに反映
-                withAnimation(.linear(duration: 0.1)) {
-                    self?.roll = data.attitude.roll
-                    self?.pitch = data.attitude.pitch
-                }
-            }
+    private func handleAddAction() {
+        if isLimitReached {
+            Haptics.select()
+            withAnimation { showPurchaseOverlay = true }
+        } else {
+            selected = .add; Haptics.tap(); showAddFlow = true
         }
     }
 }
+
+
 
 // MARK: - SubViews
-struct BackgroundWallView: View {
-    let kits: [Kit]
-    var body: some View {
-        GeometryReader { geo in
-            // Grid settings
-            let itemSize: CGFloat = 60
-            let spacing: CGFloat = 25
-            let totalItemWidth = itemSize + spacing
-            let columns = max(1, Int(geo.size.width / totalItemWidth))
-            
-            ZStack {
-                ForEach(Array(kits.enumerated()), id: \.element.id) { index, kit in
-                    let col = index % columns
-                    let row = index / columns
-                    
-                    let x = CGFloat(col) * totalItemWidth + (totalItemWidth / 2)
-                    let y = CGFloat(row) * totalItemWidth + (totalItemWidth / 2) + 50
-                    
-                    wallItem(kit: kit)
-                        .position(x: x, y: y)
-                }
-            }
-            .rotation3DEffect(.degrees(10), axis: (x: 1, y: 0, z: 0), perspective: 0.3)
-            .ignoresSafeArea()
-            
-            LinearGradient(colors: [Color(uiColor: .systemBackground).opacity(0.0), Color(uiColor: .systemBackground).opacity(0.6)], startPoint: .top, endPoint: .bottom).ignoresSafeArea().allowsHitTesting(false)
-        }
-    }
-    
-    private func wallItem(kit: Kit) -> some View {
-        let isComplete = (kit.statusValue == 4)
-        let hasUserPhoto = (kit.completedImageURLString != nil && !kit.completedImageURLString!.isEmpty)
-        let isUserChoice = (kit.displayModeValue == 1)
-        
-        let showPhoto = hasUserPhoto && (isComplete || isUserChoice)
-        let urlToLoad = showPhoto ? kit.completedImageURLString : kit.imageURLString
-        
-        return Group {
-            if let urlStr = urlToLoad, !urlStr.isEmpty {
-                if urlStr.lowercased().hasPrefix("http") {
-                    AsyncImage(url: URL(string: urlStr)) { phase in
-                        if let image = phase.image { image.resizable().scaledToFill() }
-                        else { Color.gray.opacity(0.3) }
-                    }
-                } else if urlStr.hasPrefix("asset://") {
-                    let assetID = String(urlStr.dropFirst(8))
-                    PhAssetImage(localIdentifier: assetID)
-                        .scaledToFill()
-                } else {
-                    if let uiImage = loadLocalImage(named: urlStr) {
-                        Image(uiImage: uiImage).resizable().scaledToFill()
-                    } else { Color.gray.opacity(0.3) }
-                }
-            } else { Color.gray.opacity(0.1) }
-        }
-        .frame(width: 60, height: 60)
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .opacity(0.9)
-        .grayscale(0.4)
-    }
-    
-    private func loadLocalImage(named name: String) -> UIImage? {
-        return ImageLinker.loadLocalImage(named: name)
-    }
-}
+
 
 struct KitCardView: View {
     let kit: Kit
@@ -492,23 +367,14 @@ struct KitCardView: View {
                 let urlStr = showPhoto ? kit.completedImageURLString : kit.imageURLString
                 
                 if let path = urlStr, !path.isEmpty {
-                    if path.lowercased().hasPrefix("http") {
-                        AsyncImage(url: URL(string: path)) { phase in
-                            if let image = phase.image {
-                                image.resizable().scaledToFill()
-                            } else { placeholder }
-                        }
-                    } else if path.hasPrefix("asset://") {
+                    if path.hasPrefix("asset://") {
                         let assetID = String(path.dropFirst(8))
-                        PhAssetImage(localIdentifier: assetID)
-                            .scaledToFill()
-                    } else {
-                        if let uiImage = loadLocalImage(named: path) {
-                            Image(uiImage: uiImage)
-                                .resizable()
-                                .scaledToFill()
-                        } else { placeholder }
-                    }
+                        PhAssetImage(localIdentifier: assetID).scaledToFill()
+                    } else if let url = ImageLinker.resolve(urlString: path) {
+                        AsyncImage(url: url) { phase in
+                            if let image = phase.image { image.resizable().scaledToFill() } else { placeholder }
+                        }
+                    } else { placeholder }
                 } else { placeholder }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -533,11 +399,11 @@ struct KitCardView: View {
                         .cornerRadius(6)
                 }
                 Text(kit.title)
-                    .font(.system(size: 18, weight: .heavy))
-                    .foregroundStyle(.white)
-                    .lineLimit(2)
-                    .multilineTextAlignment(.leading)
-                    .shadow(color: .black, radius: 2, x: 0, y: 1)
+                .font(.system(size: 18, weight: .heavy))
+                .foregroundStyle(.white)
+                .lineLimit(2)
+                .multilineTextAlignment(.leading)
+                .shadow(color: .black, radius: 2, x: 0, y: 1)
                 
                 HStack(spacing: 4) {
                     Text(kit.maker)

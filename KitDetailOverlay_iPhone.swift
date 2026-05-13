@@ -19,7 +19,7 @@ struct KitDetailOverlay_iPhone: View {
     @Binding var kit: Kit?
     
     @Environment(\.modelContext) private var modelContext
-    @ObservedObject private var themeManager = ThemeManager.shared
+    @ObservedObject var themeManager = ThemeManager.shared
     
     // MARK: - Local State
     @State private var editedTitle: String = ""
@@ -37,207 +37,144 @@ struct KitDetailOverlay_iPhone: View {
     @State private var showTrashIcon: Bool = false
     @State private var showSettings: Bool = false
     
-    @State private var tempCompletedImage: UIImage? = nil
-    @State private var tempAssetID: String? = nil
+    // ✅ Discovery State
     
-    @State private var showImageOptions: Bool = false
-    @State private var showWebSearch: Bool = false
+    // ✅ Discovery State
+    // ✅ Discovery State
+    @State var discoveryRecord: DiscoveryRecord? = nil
+    @State private var showErrorAlert: Bool = false
+    @State private var errorMessage: String = ""
+    @AppStorage("pilotName") var myPilotName: String = "COMMANDER"
     
     enum PickerType: Identifiable {
         case camera, library
         var id: Int { hashValue }
     }
-    @State private var activePicker: PickerType? = nil
+    // ✅ View Model for Persistent State
+    class ViewModel: ObservableObject {
+        @Published var activePicker: PickerType? = nil
+        @Published var showArrivalScanner: Bool = false
+        @Published var showArrivalBoxArtAlert: Bool = false
+        @Published var showImageOptions: Bool = false
+        @Published var showDuplicateAlert: Bool = false
+        @Published var showDeleteAlert: Bool = false
+        @Published var showWebSearch: Bool = false
+        @Published var showBuildLog: Bool = false
+        @Published var showDatabaseMatch: Bool = false
+        @Published var capturedImageToEdit: ImageEditWrapper? = nil
+        @Published var tempCompletedImage: UIImage? = nil
+        @Published var tempAssetID: String? = nil
+    }
     
+    @StateObject private var vm = ViewModel()
+
     // ✅ キーボードフォーカス管理用
     enum Field: Hashable {
         case title, maker, scale, grade, series, memo
     }
-    @FocusState private var focusedField: Field?
+    @FocusState var focusedField: Field?
     
     private let orbSize: CGFloat = 70
     
+    @Environment(\.dismiss) var dismiss // If used as sheet, but this is Overlay.
+
     var body: some View {
         GeometryReader { geo in
-            let isLandscape = geo.size.width > geo.size.height
-            
-            ZStack {
-                // 背景ガード
-                Color(UIColor.systemBackground)
-                    .opacity(0.98)
-                    .ignoresSafeArea()
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        // 背景タップでキーボードを閉じる
-                        focusedField = nil
-                    }
-                
-                if let targetKit = kit {
-                    VStack(spacing: 0) {
-                        if isLandscape {
-                            // MARK: - Landscape Layout (V59: Focus Mode)
-                            HStack(spacing: 0) {
-                                // ✅ 入力中は画像を隠してスペースを確保
-                                if focusedField == nil {
-                                    ZStack {
-                                        Color(UIColor.secondarySystemBackground).ignoresSafeArea()
-                                        kitImageSection(kit: targetKit, isExpanded: true)
-                                            .padding()
-                                    }
-                                    .frame(width: geo.size.width * 0.4)
-                                    .transition(.move(edge: .leading)) // アニメーション
-                                }
-                                
-                                // [右カラム] 情報エリア (通常60% -> 入力時100%)
-                                VStack(spacing: 0) {
-                                    // ScrollViewReaderで特定位置へのジャンプを可能に
-                                    ScrollViewReader { proxy in
-                                        ScrollView {
-                                            VStack(alignment: .leading, spacing: 16) {
-                                                Spacer().frame(height: 10)
-                                                
-                                                editableInfoSection()
-                                                
-                                                Divider()
-                                                
-                                                statusChanger(kit: targetKit)
-                                                
-                                                Divider()
-                                                
-                                                // 横画面用下部エリア
-                                                HStack(alignment: .bottom, spacing: 16) {
-                                                    memoSection(isLandscape: true)
-                                                        .frame(maxWidth: focusedField == nil ? 200 : .infinity) // 入力時は広げる
-                                                    
-                                                    // 入力中はボタンを隠してスペースを稼ぐのもありだが、今回は維持
-                                                    if focusedField == nil {
-                                                        HStack(spacing: 12) {
-                                                            updateButtonIconOnly(targetKit: targetKit)
-                                                            deleteButtonIconOnly()
-                                                        }
-                                                    } else {
-                                                        // 入力中は「閉じる」ボタンを表示してあげると親切
-                                                        Button("完了") { focusedField = nil }
-                                                            .buttonStyle(.borderedProminent)
-                                                            .tint(themeManager.currentTheme.mainColor)
-                                                    }
-                                                    
-                                                    // オーブ回避用スペーサー(入力中はオーブも隠れるなら不要だが念のため)
-                                                    if focusedField == nil {
-                                                        Spacer().frame(width: 90)
-                                                    }
-                                                }
-                                                .padding(.bottom, 20)
-                                                
-                                                Spacer().frame(height: 300) // キーボード用の巨大な余白
-                                            }
-                                            .padding(.horizontal, 20)
-                                            // ✅ フォーカス変更時に自動スクロール
-                                                .onChange(of: focusedField) { _, newValue in
-                                                    if let field = newValue {
-                                                        LocalHaptics.tap()
-                                                        withAnimation {
-                                                            proxy.scrollTo(field, anchor: .center)
-                                                        }
-                                                    }
-                                                }
-                                        }
-                                    }
-                                }
-                                .frame(width: focusedField == nil ? geo.size.width * 0.6 : geo.size.width)
-                            }
-                        } else {
-                            // MARK: - Portrait Layout (V56維持)
-                            ScrollViewReader { proxy in
-                                ScrollView {
-                                    VStack(alignment: .leading, spacing: 16) {
-                                        kitImageSection(kit: targetKit, isExpanded: false)
-                                        
-                                        editableInfoSection()
-                                        
-                                        Divider().padding(.horizontal, 10)
-                                        
-                                        memoSection(isLandscape: false)
-                                            .padding(.horizontal, 10)
-                                        
-                                        statusChanger(kit: targetKit)
-                                        
-                                        Spacer().frame(height: 300) // キーボード回避用余白
-                                    }
-                                    .padding(.top, 10)
-                                    .onChange(of: focusedField) { _, newValue in
-                                        if let field = newValue {
-                                            withAnimation {
-                                                proxy.scrollTo(field, anchor: .center)
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                            
-                            // 入力中はコントロールバーを隠す（画面を広く使うため）
-                            if focusedField == nil {
-                                portraitBottomControlBar(targetKit: targetKit)
-                            }
-                        }
-                    }
-                    
-                    // Floating Orb (入力中は隠すか、邪魔にならないようにする)
-                    if focusedField == nil {
-                        if isLandscape {
-                            BlueOrbView(isAnimating: true, size: orbSize)
-                                .position(x: geo.size.width - 60, y: geo.size.height - 60)
-                                .onTapGesture {
-                                    LocalHaptics.tap()
-                                    self.kit = nil
-                                }
-                        } else {
-                            orbLayer(geo: geo)
-                        }
-                    }
-                }
-            }
+            mainContent(geo: geo)
+        }
+        .task {
+             if let t = kit, !t.jan.isEmpty {
+                 self.discoveryRecord = await DiscoveryManager.shared.checkDiscovery(jan: t.jan)
+             }
         }
         .transition(.move(edge: .bottom).combined(with: .opacity))
-        .animation(.spring(response: 0.4, dampingFraction: 0.8), value: focusedField) // レイアウト変化のアニメーション
+        .animation(.spring(response: 0.4, dampingFraction: 0.8), value: focusedField)
         .onAppear { initializeStates() }
-        
-        // --- Alerts & Sheets ---
-        .confirmationDialog(isMyPhotoMode ? "自分の写真を更新" : "箱絵を更新", isPresented: $showImageOptions) {
-            if !isMyPhotoMode {
-                Button("Webから箱絵を探す") { showWebSearch = true }
-            } else {
-                Button("カメラで撮影") { activePicker = .camera }
-                Button("アルバムから選択") { activePicker = .library }
-                if let k = kit, let _ = k.completedImageURLString {
-                    Button("写真を削除", role: .destructive) { deleteMyPhoto() }
+        .modifier(KitDetailOverlayAlerts(
+            kit: $kit,
+            vm: vm, // Pass VM instead of individual bindings
+            isMyPhotoMode: isMyPhotoMode,
+            editedTitle: editedTitle,
+            editedMaker: editedMaker,
+            editedGrade: editedGrade,
+            editedScale: editedScale,
+            // Actions
+            handleArrivalCheck: handleArrivalCheck,
+            deleteMyPhoto: deleteMyPhoto,
+            deleteKit: deleteKit,
+            handleImageSelection: handleImageSelection,
+            loadAssetImageForEditing: loadAssetImageForEditing,
+            // Binding updates (hacky but needed for modifier to write back)
+            updateEditedFields: { item in
+                editedTitle = item.title
+                editedMaker = item.maker
+                editedSeries = item.series
+                editedGrade = item.grade
+                editedScale = item.scale
+                kit?.jan = item.jan
+            }
+        ))
+    }
+
+    private func mainContent(geo: GeometryProxy) -> some View {
+        let isLandscape = geo.size.width > geo.size.height
+        return ZStack {
+            // 背景ガード
+            Color(UIColor.systemBackground)
+                .opacity(0.98)
+                .ignoresSafeArea()
+                .contentShape(Rectangle())
+                .onTapGesture { focusedField = nil }
+            
+            if let targetKit = kit {
+                VStack(spacing: 0) {
+                    headerView(geo: geo)
+
+                    if isLandscape {
+                        landscapeLayout(geo: geo, targetKit: targetKit)
+                    } else {
+                        portraitLayout(geo: geo, targetKit: targetKit, proxy: nil)
+                    }
                 }
             }
-            Button("キャンセル", role: .cancel) { }
-        }
-        .alert("既に登録されています", isPresented: $showDuplicateAlert) {
-            Button("OK", role: .cancel) { }
-        } message: { Text("このアイテムは既にコレクションに含まれています。") }
-        .alert("手放しますか？", isPresented: $showDeleteAlert) {
-            Button("キャンセル", role: .cancel) { showTrashIcon = false }
-            Button("手放す (削除)", role: .destructive) { deleteKit() }
-        } message: { Text("このデータは完全に削除され、元に戻せません。") }
-        .sheet(isPresented: $showWebSearch) {
-            if let targetKit = kit {
-                let refinedQuery = "\(editedTitle) \(editedMaker) \(editedGrade) \(editedScale) プラモデル"
-                DetailWebImageSearchModal(kit: targetKit, isPresented: $showWebSearch, initialSearchText: refinedQuery)
-            }
-        }
-        .sheet(item: $activePicker) { type in
-            ImagePicker(
-                sourceType: (type == .camera ? .camera : .photoLibrary),
-                selectedImage: $tempCompletedImage,
-                selectedAssetID: $tempAssetID
-            )
-            .onDisappear { handleImageSelection() }
-            .ignoresSafeArea()
         }
     }
+    
+    private func headerView(geo: GeometryProxy) -> some View {
+        HStack {
+            Button {
+                LocalHaptics.tap()
+                self.kit = nil
+            } label: {
+                ZStack {
+                    Color.clear.frame(width: 60, height: 60)
+                    Image(systemName: "xmark")
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundStyle(themeManager.currentTheme.mainColor)
+                        .frame(width: 44, height: 44)
+                        .background(Color(UIColor.secondarySystemBackground))
+                        .clipShape(Circle())
+                }
+                .contentShape(Rectangle())
+            }
+            Spacer()
+            Text("アイテム詳細").font(.system(size: 16, weight: .bold)).foregroundStyle(.primary)
+            Spacer()
+            Color.clear.frame(width: 44, height: 44)
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, geo.safeAreaInsets.top + 10)
+        .padding(.bottom, 10)
+        .background(Color(UIColor.systemBackground))
+    }
+
+
+}
+
+// Wrapper for Identifiable Image
+struct ImageEditWrapper: Identifiable {
+    let id = UUID()
+    let image: UIImage
 }
 
 // MARK: - Subviews & Logic (iPhone)
@@ -256,33 +193,55 @@ extension KitDetailOverlay_iPhone {
     }
 
     @ViewBuilder
-    private func kitImageSection(kit: Kit, isExpanded: Bool) -> some View {
+    func kitImageSection(kit: Kit, isExpanded: Bool) -> some View {
         VStack(spacing: 12) {
             ZStack {
-                let hasUserPhoto = (kit.completedImageURLString != nil && !kit.completedImageURLString!.isEmpty)
                 let isUserChoiceMyPhoto = (kit.displayModeValue == 1)
-                let showPhoto = isUserChoiceMyPhoto && hasUserPhoto
-                let p: String? = showPhoto ? kit.completedImageURLString : kit.imageURLString
                 
-                if let path = p, !path.isEmpty {
-                    if path.hasPrefix("http") {
-                        AsyncImage(url: URL(string: path)) { phase in
-                            if let image = phase.image {
-                                image.resizable().scaledToFit()
-                            } else { placeholder() }
-                        }
-                    } else if path.hasPrefix("asset://") {
-                        PhAssetImage(localIdentifier: String(path.dropFirst("asset://".count))).scaledToFit()
-                    } else if let uiImage = loadLocalImage(named: path) {
-                        Image(uiImage: uiImage).resizable().scaledToFit()
-                    } else { placeholder() }
+                let targetData = isUserChoiceMyPhoto ? kit.completedImageData : kit.imageData
+                let targetPath = isUserChoiceMyPhoto ? kit.completedImageURLString : kit.imageURLString
+                
+                if (targetData != nil) || (targetPath?.isEmpty == false) {
+                    UniversalImageView(imageData: targetData, imagePath: targetPath)
+                        .scaledToFit()
                 } else { placeholder() }
                 
                 VStack {
                     Spacer()
                     HStack {
+                        // Edit Button (New)
+                        if (targetData != nil) || (targetPath?.isEmpty == false) {
+                            Button {
+                                LocalHaptics.select()
+                                // Load image for editing
+                                if let d = targetData, let img = UIImage(data: d) {
+                                    vm.capturedImageToEdit = ImageEditWrapper(image: img)
+                                } else if let p = targetPath {
+                                    // Async load
+                                    if p.hasPrefix("asset://") {
+                                        let id = String(p.dropFirst(8))
+                                        loadAssetImageForEditing(id)
+                                    } else {
+                                        if let img = loadLocalImage(named: p) {
+                                            vm.capturedImageToEdit = ImageEditWrapper(image: img)
+                                        }
+                                    }
+                                }
+                            } label: {
+                                Image(systemName: "crop.rotate")
+                                    .font(.system(size: 14, weight: .bold))
+                                    .foregroundStyle(.white)
+                                    .padding(8)
+                                    .background(.black.opacity(0.6))
+                                    .clipShape(Circle())
+                            }
+                            .padding(8)
+                        }
+                        
                         Spacer()
-                        Image(systemName: showPhoto ? "camera.fill" : "magnifyingglass")
+                        
+                        // Existing Indicator
+                        Image(systemName: isUserChoiceMyPhoto ? "camera.fill" : "magnifyingglass")
                             .font(.system(size: 14, weight: .bold))
                             .foregroundStyle(.white)
                             .padding(8)
@@ -301,14 +260,14 @@ extension KitDetailOverlay_iPhone {
                 RoundedRectangle(cornerRadius: 12)
                     .stroke(Color.white.opacity(0.2), lineWidth: 1)
             )
-            .onTapGesture {
-                LocalHaptics.tap()
-                showImageOptions = true
+           if !kit.jan.isEmpty {
+            Button("データベース照合") {
+                vm.showDatabaseMatch = true
             }
-            
+        }    
             HStack(spacing: 0) {
-                modeButton(title: "Box Art", targetValue: 0)
-                modeButton(title: "My Photo", targetValue: 1)
+                modeButton(title: "箱絵", targetValue: 0)
+                modeButton(title: "マイフォト", targetValue: 1)
             }
             .background(Color(UIColor.secondarySystemBackground))
             .clipShape(Capsule())
@@ -340,7 +299,7 @@ extension KitDetailOverlay_iPhone {
     }
 
     @ViewBuilder
-    private func editableInfoSection() -> some View {
+    func editableInfoSection() -> some View {
         VStack(alignment: .leading, spacing: 12) {
             highlightedTextField("アイテム名", text: $editedTitle, field: .title, fontSize: 18, isBold: true)
             
@@ -351,8 +310,33 @@ extension KitDetailOverlay_iPhone {
             }
             
             highlightedTextField("シリーズ名", text: $editedSeries, field: .series)
+            
+            // Add match button here
+            databaseMatchButton()
         }
         .padding(.horizontal, 10)
+    }
+
+    // ✅ データベース照合ボタン
+    func databaseMatchButton() -> some View {
+        Button {
+            LocalHaptics.tap()
+            vm.showDatabaseMatch = true
+        } label: {
+            HStack {
+                Image(systemName: "arrow.triangle.2.circlepath")
+                    .font(.caption)
+                Text("データベースと照合して補完")
+                    .font(.caption)
+                    .bold()
+            }
+            .foregroundColor(themeManager.currentTheme.mainColor)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(themeManager.currentTheme.mainColor.opacity(0.1))
+            .cornerRadius(8)
+        }
+        .padding(.leading, 4)
     }
     
     // ✅ フォーカス対応版 TextField
@@ -378,9 +362,9 @@ extension KitDetailOverlay_iPhone {
     }
 
     @ViewBuilder
-    private func statusChanger(kit: Kit) -> some View {
+    func statusChanger(kit: Kit) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text("STATUS")
+            Text("ステータス")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .padding(.leading, 14)
@@ -420,9 +404,9 @@ extension KitDetailOverlay_iPhone {
     }
     
     // ✅ フォーカス対応版 メモ欄
-    private func memoSection(isLandscape: Bool = false) -> some View {
+    func memoSection(isLandscape: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text("MEMO")
+            Text("メモ")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .padding(.leading, 4)
@@ -440,54 +424,117 @@ extension KitDetailOverlay_iPhone {
         }
     }
 
-    private func updateButtonIconOnly(targetKit: Kit) -> some View {
+    func updateButtonIconOnly(targetKit: Kit) -> some View {
         Button {
             LocalHaptics.select()
-            if checkDuplication(currentKit: targetKit) { showDuplicateAlert = true }
+            if checkDuplication(currentKit: targetKit) { vm.showDuplicateAlert = true }
             else { saveChanges(kit: targetKit) }
         } label: {
-            Image("update")
-                .resizable()
-                .renderingMode(.template)
-                .scaledToFit()
-                .frame(width: 30, height: 30)
-                .foregroundStyle(themeManager.currentTheme.mainColor)
-                .padding(16)
-                .background(Circle().fill(Color(UIColor.systemBackground)).shadow(color: .black.opacity(0.2), radius: 4, x: 0, y: 2))
+            VStack(spacing: 4) {
+                Image("update")
+                    .resizable()
+                    .renderingMode(.template)
+                    .scaledToFit()
+                    .frame(width: 24, height: 24)
+                    .foregroundStyle(themeManager.currentTheme.mainColor)
+                Text("更新")
+                    .font(.caption2)
+                    .bold()
+                    .foregroundStyle(themeManager.currentTheme.mainColor)
+            }
+            .frame(width: 60, height: 60)
+            .background(Circle().fill(Color(UIColor.systemBackground)).shadow(color: .black.opacity(0.1), radius: 4, x: 0, y: 2))
+            .overlay(Circle().stroke(themeManager.currentTheme.mainColor.opacity(0.3), lineWidth: 1))
         }
     }
     
-    private func deleteButtonIconOnly() -> some View {
+    func deleteButtonIconOnly() -> some View {
         Button {
             LocalHaptics.error()
-            showDeleteAlert = true
+            vm.showDeleteAlert = true
         } label: {
-            Image("trash")
-                .resizable()
-                .renderingMode(.template)
-                .scaledToFit()
-                .frame(width: 30, height: 30)
-                .foregroundStyle(.red)
-                .padding(16)
-                .background(Circle().fill(Color(UIColor.systemBackground)).shadow(color: .black.opacity(0.2), radius: 4, x: 0, y: 2))
+            VStack(spacing: 4) {
+                Image("trash")
+                    .resizable()
+                    .renderingMode(.template)
+                    .scaledToFit()
+                    .frame(width: 24, height: 24)
+                    .foregroundStyle(.red)
+                Text("リムーブ")
+                    .font(.caption2)
+                    .bold()
+                    .foregroundStyle(.red)
+            }
+            .frame(width: 60, height: 60)
+            .background(Circle().fill(Color(UIColor.systemBackground)).shadow(color: .black.opacity(0.1), radius: 4, x: 0, y: 2))
         }
     }
     
-    private func portraitBottomControlBar(targetKit: Kit) -> some View {
-        VStack {
-            // Divider() はV58で削除済み
-            HStack {
+    @ViewBuilder
+    func buildLogButtonIconOnly() -> some View {
+        if let k = kit, k.statusValue >= 3 {
+            Button {
+                LocalHaptics.select()
+                vm.showBuildLog = true
+            } label: {
+                Image(systemName: "doc.text.image")
+                    .resizable()
+                    .renderingMode(.template)
+                    .scaledToFit()
+                    .frame(width: 30, height: 30)
+                    .foregroundStyle(themeManager.currentTheme.mainColor)
+                    .padding(16)
+                    .background(Circle().fill(Color(UIColor.systemBackground)).shadow(color: .black.opacity(0.2), radius: 4, x: 0, y: 2))
+            }
+        }
+    }
+    
+    func portraitBottomControlBar(targetKit: Kit) -> some View {
+        let showLog = targetKit.statusValue >= 3
+        let isReserved = targetKit.statusValue == 1
+        
+        return VStack(spacing: 8) {
+            // Row 0: Arrival Button (Prominent)
+                if isReserved {
+                    Button {
+                        LocalHaptics.select()
+                        vm.showArrivalScanner = true
+                    } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: "box.truck.badge.clock.fill")
+                                .font(.system(size: 18))
+                            Text("着弾報告 (バーコードスキャン)")
+                            .font(.system(size: 14, weight: .bold))
+                    }
+                    .foregroundColor(.white)
+                    .padding(.vertical, 12)
+                    .frame(maxWidth: .infinity)
+                    .background(themeManager.currentTheme.mainColor)
+                    .cornerRadius(8)
+                    .shadow(color: themeManager.currentTheme.mainColor.opacity(0.3), radius: 4, x: 0, y: 2)
+                }
+                .padding(.horizontal, 40)
+            }
+            
+            // Row 1: Build Log Button (Above Update Button)
+            if showLog {
+                HStack {
+                    Spacer()
+                    buildLogButtonIconOnly()
+                }
+                .padding(.horizontal, 40)
+            }
+            
+            // Row 2: Standard Controls
+            HStack(spacing: 40) {
                 deleteButtonIconOnly()
-                Spacer()
-                Color.clear.frame(width: orbSize, height: orbSize)
-                Spacer()
                 updateButtonIconOnly(targetKit: targetKit)
             }
-            .padding(.horizontal, 40)
-            .padding(.top, 10)
-            .padding(.bottom, 20)
-            .background(Color(UIColor.systemBackground).opacity(0.95))
+            .frame(maxWidth: .infinity)
         }
+        .padding(.top, 10)
+        .padding(.bottom, 20)
+        .background(Color(UIColor.systemBackground).opacity(0.95))
     }
     
     private func checkDuplication(currentKit: Kit) -> Bool {
@@ -501,17 +548,7 @@ extension KitDetailOverlay_iPhone {
         catch { return false }
     }
     
-    private func orbLayer(geo: GeometryProxy) -> some View {
-        let x = geo.size.width / 2
-        let y = geo.size.height - 65
-        return BlueOrbView(isAnimating: true, size: orbSize)
-            .position(x: x, y: y)
-            .zIndex(3000)
-            .onTapGesture {
-                LocalHaptics.tap()
-                self.kit = nil
-            }
-    }
+
 
     private func saveChanges(kit: Kit) {
         kit.title = editedTitle; kit.maker = editedMaker; kit.series = editedSeries
@@ -528,32 +565,54 @@ extension KitDetailOverlay_iPhone {
 
     private func handleImageSelection() {
         guard let t = kit else { return }
+        guard let image = vm.tempCompletedImage else { return } // Only handle new images here
         
         let isMyPhoto = (t.displayModeValue == 1)
-        let oldFilename = isMyPhoto ? t.completedImageURLString : t.imageURLString
-        var newLinkString: String? = nil
         
-        if let assetID = tempAssetID {
-            newLinkString = "asset://" + assetID
-        } else if let img = tempCompletedImage {
-            guard let data = img.jpegData(compressionQuality: 0.8) else { return }
-            let name = "img_\(UUID().uuidString).jpg"
-            let url = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent(name)
-            try? data.write(to: url)
-            newLinkString = name
-        }
-        
-        if let newValue = newLinkString {
-            deleteLocalImageFile(named: oldFilename)
-            if isMyPhoto {
-                t.completedImageURLString = newValue
-            } else {
-                t.imageURLString = newValue
+        // Use PhotoSaver to save to Album and get Asset ID
+        PhotoSaver.shared.saveImageToCustomAlbum(image) { assetID in
+            DispatchQueue.main.async {
+                if let id = assetID {
+                    // Success: Link Asset
+                    withAnimation {
+                        if isMyPhoto {
+                            t.completedImageURLString = "asset://\(id)"
+                             // Clear data if we have asset
+                            t.completedImageData = nil
+                        } else {
+                            t.imageURLString = "asset://\(id)" // Box Art
+                            t.imageData = nil
+                        }
+                        
+                        // Force update display mode if Box Art
+                        if !isMyPhoto {
+                             t.displayModeValue = 0
+                        }
+                        
+                        t.updatedDate = Date()
+                    }
+                    LocalHaptics.success()
+                } else {
+                    // Fallback: Save Data directly if PhotoSaver fails
+                    print("PhotoSaver failed, falling back to Core Data storage")
+                    if let data = image.jpegData(compressionQuality: 0.8) {
+                        if isMyPhoto {
+                            t.completedImageData = data
+                            t.completedImageURLString = nil
+                        } else {
+                            t.imageData = data
+                            t.imageURLString = nil
+                        }
+                        t.updatedDate = Date()
+                        LocalHaptics.warning()
+                    }
+                }
+                
+                // Cleanup
+                self.vm.tempAssetID = nil
+                self.vm.tempCompletedImage = nil
             }
         }
-        
-        tempAssetID = nil
-        tempCompletedImage = nil
     }
     
     private func deleteMyPhoto() {
@@ -568,11 +627,214 @@ extension KitDetailOverlay_iPhone {
         guard let t = kit else { return }
         deleteLocalImageFile(named: t.imageURLString)
         deleteLocalImageFile(named: t.completedImageURLString)
+        
+        // Record Deletion for Sync
+        DeletionManager.shared.recordDeletion(uuid: t.uuid)
+        
         modelContext.delete(t)
         self.kit = nil
     }
     
     private func deleteLocalImageFile(named name: String?) {
         ImageLinker.deleteLocalImageFile(named: name)
+    }
+    
+    private func loadAssetImageForEditing(_ id: String) {
+        let options = PHImageRequestOptions()
+        options.isNetworkAccessAllowed = true
+        options.deliveryMode = .highQualityFormat
+        
+        let assets = PHAsset.fetchAssets(withLocalIdentifiers: [id], options: nil)
+        if let asset = assets.firstObject {
+            PHImageManager.default().requestImage(for: asset, targetSize: CGSize(width: 2000, height: 2000), contentMode: .aspectFit, options: options) { result, _ in
+                if let image = result {
+                    DispatchQueue.main.async {
+                        self.vm.capturedImageToEdit = ImageEditWrapper(image: image)
+                    }
+                }
+            }
+        }
+    }
+    
+    // ✅ Arrival Check Logic
+    private func handleArrivalCheck(jan: String) {
+        guard let t = kit else { return }
+        
+        print("Arrival Check: \(jan)")
+        
+        Task {
+            // Ensure DB is loaded (Fix for "No Match" bug on cold start)
+            await CSVDataManager.shared.ensureDataLoaded()
+            
+            await MainActor.run {
+                // 1. Search DB
+                if let match = CSVDataManager.shared.findByJAN(jan) {
+                    // Match Found - Overwrite Core Data
+                    withAnimation {
+                        t.title = match.title
+                        t.maker = match.maker
+                        t.series = match.series
+                        t.grade = match.grade
+                        t.scale = match.scale
+                        t.jan = match.jan
+                        t.statusValue = 2 // Update to Stock
+                        
+                        // Keep Memo & Images & UUID
+                        t.updatedDate = Date()
+                        
+                        // Update Local State for UI
+                        editedTitle = t.title
+                        editedMaker = t.maker
+                        editedSeries = t.series
+                        editedGrade = t.grade
+                        editedScale = t.scale
+                        editedStatus = 2
+                    }
+                    LocalHaptics.success()
+                } else {
+                    // No Match - Provisional Update
+                    withAnimation {
+                        t.jan = jan
+                        t.statusValue = 2 // Update to Stock
+                        t.updatedDate = Date()
+                        
+                        editedStatus = 2
+                    }
+                    LocalHaptics.warning()
+                }
+                
+                // After processing, prompt for Box Art if no image exists
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    self.vm.showArrivalBoxArtAlert = true
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Alert Modifier
+struct KitDetailOverlayAlerts: ViewModifier {
+    @Binding var kit: Kit?
+    @ObservedObject var vm: KitDetailOverlay_iPhone.ViewModel
+    
+    
+    let isMyPhotoMode: Bool
+    let editedTitle: String
+    let editedMaker: String
+    let editedGrade: String
+    let editedScale: String
+    
+    // Actions
+    let handleArrivalCheck: (String) -> Void
+    let deleteMyPhoto: () -> Void
+    let deleteKit: () -> Void
+    let handleImageSelection: () -> Void
+    let loadAssetImageForEditing: (String) -> Void
+    let updateEditedFields: (CSVKitData) -> Void
+    
+    @State private var showTrashIcon: Bool = false // Helper for inner state if needed, or pass from parent?
+    // Note: showTrashIcon was in parent state. We might need to bind it if alerts depend on it, 
+    // but looking at usage, it's used to TRIGGER alert.
+    
+    func body(content: Content) -> some View {
+        content
+            .confirmationDialog("着弾確認", isPresented: $vm.showArrivalBoxArtAlert) {
+                Button("箱絵を撮影する") {
+                    kit?.displayModeValue = 0
+                    vm.activePicker = .camera
+                }
+                Button("アルバムから選択") {
+                    kit?.displayModeValue = 0
+                    vm.activePicker = .library
+                }
+                Button("あとで", role: .cancel) { }
+            } message: { Text("着弾おめでとうございます！\n続けてパッケージ写真を登録しますか？") }
+            .confirmationDialog(isMyPhotoMode ? "自分の写真を更新" : "箱絵を更新", isPresented: $vm.showImageOptions) {
+                Button("カメラで撮影") { vm.activePicker = .camera }
+                Button("アルバムから選択") { vm.activePicker = .library }
+                if !isMyPhotoMode {
+                    Button("Webから箱絵を探す") { vm.showWebSearch = true }
+                } 
+                
+                if let k = kit, let _ = k.completedImageURLString, isMyPhotoMode {
+                    Button("写真を削除", role: .destructive) { deleteMyPhoto() }
+                }
+                
+                Button("キャンセル", role: .cancel) { }
+            }
+            .alert("既に登録されています", isPresented: $vm.showDuplicateAlert) {
+                Button("OK", role: .cancel) { }
+            } message: { Text("このアイテムは既にコレクションに含まれています。") }
+            .alert("手放しますか？", isPresented: $vm.showDeleteAlert) {
+                Button("キャンセル", role: .cancel) { }
+                Button("手放す (削除)", role: .destructive) { deleteKit() }
+            } message: { Text("このデータは完全に削除され、元に戻せません。") }
+            .sheet(isPresented: $vm.showWebSearch) {
+                if let targetKit = kit {
+                    let refinedQuery = "\(editedTitle) \(editedMaker) \(editedGrade) \(editedScale) プラモデル"
+                    DetailWebImageSearchModal(kit: targetKit, isPresented: $vm.showWebSearch, initialSearchText: refinedQuery)
+                }
+            }
+            .sheet(isPresented: $vm.showBuildLog) {
+                if let k = kit {
+                    BuildLogView(kit: k, isPresented: $vm.showBuildLog)
+                }
+            }
+            .sheet(isPresented: $vm.showDatabaseMatch) {
+                DatabaseMatchModal(isPresented: $vm.showDatabaseMatch, currentTitle: editedTitle) { selectedItem in
+                    updateEditedFields(selectedItem)
+                    LocalHaptics.success()
+                }
+            }
+            .background(
+                EmptyView()
+                    .sheet(isPresented: $vm.showArrivalScanner) {
+                         BarcodeScannerView(onFound: { code in
+                             handleArrivalCheck(code)
+                             vm.showArrivalScanner = false
+                         })
+                         .edgesIgnoringSafeArea(.all)
+                    }
+            )
+            .background(
+                EmptyView()
+                    .sheet(item: $vm.activePicker) { type in
+                        ImagePicker(
+                            sourceType: (type == .camera ? .camera : .photoLibrary),
+                            selectedImage: .constant(nil),
+                            selectedAssetID: Binding(
+                                get: { nil },
+                                set: { id in
+                                     if let id = id {
+                                         vm.activePicker = nil // Explicitly dismiss picker first
+                                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                                             loadAssetImageForEditing(id)
+                                         }
+                                     }
+                                }
+                            ),
+                            onCameraCapture: { image in
+                                 vm.activePicker = nil
+                                 // Delay to allow sheet to dismiss before presenting fullScreenCover
+                                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                                     vm.capturedImageToEdit = ImageEditWrapper(image: image)
+                                 }
+                            }
+                        )
+                        .ignoresSafeArea()
+                    }
+            )
+            .fullScreenCover(item: $vm.capturedImageToEdit) { wrapper in
+                PerspectiveEditorView(
+                    image: wrapper.image,
+                    onComplete: { edited in
+                        vm.tempCompletedImage = edited
+                        handleImageSelection()
+                        vm.capturedImageToEdit = nil
+                    },
+                    onCancel: { vm.capturedImageToEdit = nil }
+                )
+            }
+
     }
 }

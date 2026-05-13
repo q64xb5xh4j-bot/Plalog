@@ -30,74 +30,56 @@ struct DetailWebImageSearchModal: View {
     @Binding var isPresented: Bool
     let initialSearchText: String
     
-    @State private var searchText = ""
-    @State private var items: [YahooItem] = []
-    @State private var isLoading = false
-    
     var body: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Text("SEARCH BOX ART")
-                    .font(.system(size: 16, weight: .bold, design: .monospaced))
-                Spacer()
-                Button("CLOSE") { isPresented = false }
-                    .font(.system(size: 14, weight: .bold))
-            }
-            .padding()
-            .background(Color(UIColor.secondarySystemBackground))
-            
-            TextField("検索ワードを調整...", text: $searchText)
-                .padding()
-                .textFieldStyle(.roundedBorder)
-                .onSubmit { search() }
-            
-            if isLoading {
-                Spacer()
-                ProgressView()
-                Spacer()
-            } else {
-                ScrollView {
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 100))]) {
-                        ForEach(items) { item in
-                            Button {
-                                kit.imageURLString = item.imageURL?.absoluteString
-                                LocalHaptics.select()
-                                isPresented = false
-                            } label: {
-                                AsyncImage(url: item.imageURL) { p in
-                                    if let i = p.image {
-                                        i.resizable().interpolation(.high).scaledToFill()
-                                    } else {
-                                        Color.gray.opacity(0.3)
-                                    }
-                                }
-                                .frame(height: 100)
-                                .clipped()
-                            }
+        WebImageSearchModal(
+            kit: kit,
+            isPresented: $isPresented,
+            initialQuery: initialSearchText,
+            onImageSelected: { resultString in
+                Task {
+                    var finalData: Data? = nil
+                    
+                    if resultString.hasPrefix("asset://") {
+                         let assetID = String(resultString.dropFirst(8))
+                         finalData = await fetchAssetData(localIdentifier: assetID)
+                    } else {
+                         // Local file
+                         if let url = ImageLinker.resolve(urlString: resultString) {
+                             finalData = try? Data(contentsOf: url)
+                         }
+                    }
+                    
+                    if let data = finalData {
+                        await MainActor.run {
+                            // Cleanup old file reference if needed, but since we switch to Data, it's fine.
+                            ImageLinker.deleteLocalImageFile(named: kit.imageURLString)
+                            
+                            kit.imageData = data
+                            kit.imageURLString = nil // Use CloudKit Data
+                            kit.updatedDate = Date()
                         }
                     }
-                    .padding()
                 }
             }
-        }
-        .onAppear {
-            searchText = initialSearchText
-            search()
-        }
+        )
     }
     
-    private func search() {
-        isLoading = true
-        Task {
-            do {
-                let res = try await YahooShoppingClient.shared.search(query: searchText)
-                await MainActor.run {
-                    items = res
-                    isLoading = false
-                }
-            } catch {
-                await MainActor.run { isLoading = false }
-            }
+    // Helper Copy
+    private func fetchAssetData(localIdentifier: String) async -> Data? {
+        return await withCheckedContinuation { continuation in
+             let options = PHImageRequestOptions()
+             options.isSynchronous = false
+             options.deliveryMode = .highQualityFormat
+             options.isNetworkAccessAllowed = true
+             
+             let assets = PHAsset.fetchAssets(withLocalIdentifiers: [localIdentifier], options: nil)
+             if let asset = assets.firstObject {
+                 PHImageManager.default().requestImageDataAndOrientation(for: asset, options: options) { data, _, _, _ in
+                     continuation.resume(returning: data)
+                 }
+             } else {
+                 continuation.resume(returning: nil)
+             }
         }
     }
 }

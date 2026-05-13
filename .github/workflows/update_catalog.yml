@@ -35,33 +35,30 @@ jobs:
       - name: Run catalog update
         working-directory: ./scripts
         run: |
-          set -x  # Enable command echoing for debugging
           echo "🚀 Starting catalog update..."
-          echo "Python version: $(python --version 2>&1 || python3 --version)"
+          echo "Python version: $(python3 --version)"
 
-          echo "📊 Gunpla (Bandai)..."
-          python -u scrape_gunpla.py || python3 -u scrape_gunpla.py
+          echo "📊 Gunpla (Bandai) - Scraping Wikipedia..."
+          python3 -u scrape_gunpla.py
 
-          # SKIPPED: fill_jan_hobbysearch.py - HobbySearch rate limiting causes timeouts
-          python -u normalize_series.py || python3 -u normalize_series.py
+          echo "📊 Normalizing series names..."
+          python3 -u normalize_series.py
 
-          echo "📊 Other manufacturers (Kotobukiya, Tamiya, Hasegawa)..."
-          python -u scrape_hobbysearch_all.py || python3 -u scrape_hobbysearch_all.py
+          # SKIPPED: fill_jan_hobbysearch.py - rate limiting causes 429 errors
+          # SKIPPED: scrape_hobbysearch_all.py - SSL hang on GitHub Actions runners
 
           echo "✅ Catalog update complete"
 
       - name: Check for changes
         id: changes
         run: |
-          if git diff --quiet gunpla_catalog.csv kotobukiya_models.csv tamiya_military.csv hasegawa_aircraft.csv; then
+          if git diff --quiet gunpla_catalog.csv; then
             echo "changed=false" >> $GITHUB_OUTPUT
-            echo "ℹ️ No changes to catalogs"
+            echo "ℹ️ No changes to gunpla_catalog.csv"
           else
             echo "changed=true" >> $GITHUB_OUTPUT
-            echo "📊 Catalogs updated"
-            echo "Changed files:"
-            git diff --name-only
-            git diff --stat gunpla_catalog.csv kotobukiya_models.csv tamiya_military.csv hasegawa_aircraft.csv 2>/dev/null || true
+            echo "📊 Catalog updated:"
+            git diff --stat gunpla_catalog.csv
           fi
 
       - name: Create Release with Assets (if changed)
@@ -73,30 +70,23 @@ jobs:
           tag_name: catalog-${{ github.run_number }}-${{ github.run_id }}
           name: Catalog Update - ${{ github.run_number }}
           body: |
-            Automated model catalog update
+            Automated Gunpla catalog update (Wikipedia scrape + series normalization)
 
             **Files included:**
-            - gunpla_catalog.csv - Gundam Plastic Models from Bandai (Wikipedia + normalized)
-            - kotobukiya_models.csv - Kotobukiya models
-            - tamiya_military.csv - Tamiya military miniatures
-            - hasegawa_aircraft.csv - Hasegawa aircraft models
+            - gunpla_catalog.csv - Gundam Plastic Models from Bandai
 
             Generated at: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           draft: false
           prerelease: false
-          files: |
-            gunpla_catalog.csv
-            kotobukiya_models.csv
-            tamiya_military.csv
-            hasegawa_aircraft.csv
+          files: gunpla_catalog.csv
 
       - name: Commit changes (if changed)
         if: steps.changes.outputs.changed == 'true'
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          git add gunpla_catalog.csv kotobukiya_models.csv tamiya_military.csv hasegawa_aircraft.csv
-          git commit -m "chore: update model catalogs - $(date +'%Y-%m-%d')"
+          git add gunpla_catalog.csv
+          git commit -m "chore: update gunpla catalog - $(date +'%Y-%m-%d')"
           git push
 
       - name: Notify (no changes)

@@ -1,9 +1,11 @@
 
 import csv
 import shutil
+import os
 
-input_file = '/Users/hiro/Desktop/アプリ開発/Pralog/Plalog/gunpla_catalog.csv'
-output_file = '/Users/hiro/Desktop/アプリ開発/Pralog/Plalog/gunpla_catalog_normalized.csv'
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+input_file = os.path.join(SCRIPT_DIR, "..", "gunpla_catalog.csv")
+output_file = os.path.join(SCRIPT_DIR, "..", "gunpla_catalog_normalized.csv")
 
 # MAPPING DEFINITIONS
 series_map = [

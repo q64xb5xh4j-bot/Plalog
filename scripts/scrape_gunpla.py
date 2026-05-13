@@ -39,7 +39,10 @@ TARGETS = [
     }
 ]
 
-CSV_PATH = "/Users/hiro/Desktop/アプリ開発/Pralog/Plalog/gunpla_catalog.csv"
+import os
+# Use relative path (works in GitHub Actions too)
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+CSV_PATH = os.path.join(SCRIPT_DIR, "..", "gunpla_catalog.csv")
 
 def get_soup(url):
     try:

@@ -8,8 +8,9 @@ import os
 import sys
 
 # --- CONFIGURATION ---
-TARGET_FILE = "/Users/hiro/Desktop/アプリ開発/Pralog/Plalog/gunpla_catalog.csv"
-BACKUP_FILE = "/Users/hiro/Desktop/アプリ開発/Pralog/Plalog/gunpla_catalog_before_hobbysearch.csv"
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+TARGET_FILE = os.path.join(SCRIPT_DIR, "..", "gunpla_catalog.csv")
+BACKUP_FILE = os.path.join(SCRIPT_DIR, "..", "gunpla_catalog_before_hobbysearch.csv")
 
 def search_hobbysearch(query):
     """

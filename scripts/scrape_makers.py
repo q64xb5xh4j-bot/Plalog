@@ -363,6 +363,73 @@ def scrape_volks():
 
 
 # ──────────────────────────────────────────────
+# Tamiya
+# ──────────────────────────────────────────────
+
+def scrape_tamiya():
+    """Scrape Tamiya scale model kits from tamiya.com (genre_item=10)."""
+    base_url = "https://www.tamiya.com/japan/products/list.html"
+    products = []
+    page = 1
+
+    while True:
+        url = f"{base_url}?genre_item=10&absolutepage={page}"
+        try:
+            resp = requests.get(url, headers=HEADERS, timeout=15)
+            if resp.status_code != 200:
+                break
+            soup = BeautifulSoup(resp.content, "html.parser")
+
+            # <li> 内に /japan/products/XXXXX/index.html へのリンクを持つ要素を取得
+            items = [
+                li for li in soup.find_all("li")
+                if li.find("a", href=re.compile(r"/japan/products/\d+/index\.html"))
+            ]
+            if not items:
+                break
+
+            for item in items:
+                h3 = item.find("h3")
+                if not h3:
+                    continue
+
+                text = h3.get_text(strip=True)
+                # "ITEM 35216 1/35 タイガーI 極初期生産型"
+
+                # 品番除去してタイトルへ
+                # タミヤ品番は5桁固定。\d+ だと直後の "1/XX" の "1" まで食うため \d{5} で制限
+                title = re.sub(r"^ITEM\s+\d{5}\s*", "", text).strip()
+                # それでも "/" で始まる場合（品番末尾と "1/XX" が密着）は "1" を補完
+                if title.startswith("/"):
+                    title = "1" + title
+                if not title:
+                    continue
+
+                # スケール抽出
+                scale_m = re.search(r"1[/／](\d+)", title)
+                scale = f"1/{scale_m.group(1)}" if scale_m else ""
+
+                products.append({
+                    "jan":    "",
+                    "title":  title,
+                    "maker":  "Tamiya",
+                    "series": "",
+                    "grade":  "スケールモデル",
+                    "scale":  scale,
+                })
+
+            page += 1
+            time.sleep(0.5)
+
+        except Exception as e:
+            print(f"  ⚠️  Tamiya page {page}: {e}")
+            break
+
+    print(f"  Tamiya: {len(products)} items collected ({page - 1} pages)")
+    return products
+
+
+# ──────────────────────────────────────────────
 # Save CSV
 # ──────────────────────────────────────────────
 
@@ -436,6 +503,13 @@ def main():
     volks_file = os.path.join(SCRIPT_DIR, "..", "volks_models.csv")
     added, total = save_csv(volks_products, volks_file)
     print(f"  ✅ Added: {added} | Total: {total} → {volks_file}")
+
+    # ── Tamiya ──
+    print("\n🏎️  Tamiya ...")
+    tamiya_products = scrape_tamiya()
+    tamiya_file = os.path.join(SCRIPT_DIR, "..", "tamiya_models.csv")
+    added, total = save_csv(tamiya_products, tamiya_file)
+    print(f"  ✅ Added: {added} | Total: {total} → {tamiya_file}")
 
     print("\n" + "=" * 60)
     print(f"✅ Done at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")

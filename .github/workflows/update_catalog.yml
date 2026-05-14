@@ -54,13 +54,13 @@ jobs:
       - name: Check for changes
         id: changes
         run: |
-          if git diff --quiet gunpla_catalog.csv kotobukiya_models.csv hasegawa_models.csv volks_models.csv gsc_models.csv; then
+          if git diff --quiet gunpla_catalog.csv kotobukiya_models.csv hasegawa_models.csv volks_models.csv gsc_models.csv tamiya_models.csv; then
             echo "changed=false" >> $GITHUB_OUTPUT
             echo "ℹ️ No changes to catalogs"
           else
             echo "changed=true" >> $GITHUB_OUTPUT
             echo "📊 Catalogs updated:"
-            git diff --stat gunpla_catalog.csv kotobukiya_models.csv hasegawa_models.csv volks_models.csv gsc_models.csv 2>/dev/null || true
+            git diff --stat gunpla_catalog.csv kotobukiya_models.csv hasegawa_models.csv volks_models.csv gsc_models.csv tamiya_models.csv 2>/dev/null || true
           fi
 
       - name: Create Release with Assets (if changed)
@@ -86,13 +86,14 @@ jobs:
             hasegawa_models.csv
             volks_models.csv
             gsc_models.csv
+            tamiya_models.csv
 
       - name: Commit changes (if changed)
         if: steps.changes.outputs.changed == 'true'
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          git add gunpla_catalog.csv kotobukiya_models.csv hasegawa_models.csv volks_models.csv gsc_models.csv
+          git add gunpla_catalog.csv kotobukiya_models.csv hasegawa_models.csv volks_models.csv gsc_models.csv tamiya_models.csv
           git commit -m "chore: update model catalogs - $(date +'%Y-%m-%d')"
           git push
 

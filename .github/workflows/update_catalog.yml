@@ -45,20 +45,22 @@ jobs:
           python3 -u normalize_series.py
 
           # SKIPPED: fill_jan_hobbysearch.py - rate limiting causes 429 errors
-          # SKIPPED: scrape_hobbysearch_all.py - SSL hang on GitHub Actions runners
+
+          echo "📦 Other manufacturers (Kotobukiya, Hasegawa)..."
+          python3 -u scrape_makers.py
 
           echo "✅ Catalog update complete"
 
       - name: Check for changes
         id: changes
         run: |
-          if git diff --quiet gunpla_catalog.csv; then
+          if git diff --quiet gunpla_catalog.csv kotobukiya_models.csv hasegawa_models.csv; then
             echo "changed=false" >> $GITHUB_OUTPUT
-            echo "ℹ️ No changes to gunpla_catalog.csv"
+            echo "ℹ️ No changes to catalogs"
           else
             echo "changed=true" >> $GITHUB_OUTPUT
-            echo "📊 Catalog updated:"
-            git diff --stat gunpla_catalog.csv
+            echo "📊 Catalogs updated:"
+            git diff --stat gunpla_catalog.csv kotobukiya_models.csv hasegawa_models.csv 2>/dev/null || true
           fi
 
       - name: Create Release with Assets (if changed)
@@ -78,15 +80,18 @@ jobs:
             Generated at: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           draft: false
           prerelease: false
-          files: gunpla_catalog.csv
+          files: |
+            gunpla_catalog.csv
+            kotobukiya_models.csv
+            hasegawa_models.csv
 
       - name: Commit changes (if changed)
         if: steps.changes.outputs.changed == 'true'
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          git add gunpla_catalog.csv
-          git commit -m "chore: update gunpla catalog - $(date +'%Y-%m-%d')"
+          git add gunpla_catalog.csv kotobukiya_models.csv hasegawa_models.csv
+          git commit -m "chore: update model catalogs - $(date +'%Y-%m-%d')"
           git push
 
       - name: Notify (no changes)

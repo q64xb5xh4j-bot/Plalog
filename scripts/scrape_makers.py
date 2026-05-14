@@ -192,6 +192,84 @@ def scrape_hasegawa():
 
 
 # ──────────────────────────────────────────────
+# Good Smile Company (goodsmile.info)
+# ──────────────────────────────────────────────
+
+GSC_CATEGORIES = [
+    # (slug, grade_label)
+    ("moderoid", "MODEROID"),
+    ("plamax",   "PLAMAX"),
+]
+
+def scrape_gsc():
+    """
+    Scrape Good Smile Company plastic model kits from goodsmile.info.
+    Targets: MODEROID (GSC) and PLAMAX (Max Factory).
+    """
+    base = "https://goodsmile.info/ja/products/category"
+    products = []
+
+    for slug, grade in GSC_CATEGORIES:
+        page = 1
+        while True:
+            url = f"{base}/{slug}/page" if page == 1 else f"{base}/{slug}/page/{page}"
+            try:
+                resp = requests.get(url, headers=HEADERS, timeout=15)
+                if resp.status_code != 200:
+                    break
+                soup = BeautifulSoup(resp.content, "html.parser")
+
+                hitlist = soup.find(class_="hitList")
+                if not hitlist:
+                    break
+
+                items = hitlist.find_all(class_="hitBox")
+                if not items:
+                    break
+
+                for item in items:
+                    title_elem = item.find("span", class_="hitTtl")
+                    link_elem  = item.find("a", href=True)
+                    if not title_elem:
+                        continue
+
+                    title = title_elem.get_text(strip=True)
+                    if not title:
+                        continue
+
+                    # スケール抽出 (例: "PLAMAX 1/72 VF-19P" → "1/72")
+                    scale_m = re.search(r"1[/／](\d+)", title)
+                    scale = f"1/{scale_m.group(1)}" if scale_m else ""
+
+                    products.append({
+                        "jan":    "",
+                        "title":  title,
+                        "maker":  "Good Smile Company",
+                        "series": "",        # 詳細ページ取得は省略
+                        "grade":  grade,
+                        "scale":  scale,
+                    })
+
+                # ページネーション
+                import re as _re
+                title_text = soup.title.text if soup.title else ""
+                m = _re.search(r"ページ：\d+\s*/\s*(\d+)", title_text)
+                max_page = int(m.group(1)) if m else 1
+                if page >= max_page:
+                    break
+                page += 1
+                time.sleep(0.3)
+
+            except Exception as e:
+                print(f"  ⚠️  GSC [{slug}] page {page}: {e}")
+                break
+
+        print(f"  GSC [{slug}]: {sum(1 for p in products if p['maker']=='Good Smile Company')} items so far")
+
+    return products
+
+
+# ──────────────────────────────────────────────
 # Volks
 # ──────────────────────────────────────────────
 
@@ -344,6 +422,13 @@ def main():
     hase_file = os.path.join(SCRIPT_DIR, "..", "hasegawa_models.csv")
     added, total = save_csv(hase_products, hase_file)
     print(f"  ✅ Added: {added} | Total: {total} → {hase_file}")
+
+    # ── Good Smile Company ──
+    print("\n😊 Good Smile Company ...")
+    gsc_products = scrape_gsc()
+    gsc_file = os.path.join(SCRIPT_DIR, "..", "gsc_models.csv")
+    added, total = save_csv(gsc_products, gsc_file)
+    print(f"  ✅ Added: {added} | Total: {total} → {gsc_file}")
 
     # ── Volks ──
     print("\n🏯 Volks ...")

@@ -3,8 +3,9 @@
 Scrape model kit catalogs from official manufacturer websites.
 
 Supported manufacturers:
-  - Kotobukiya (kotobukiya.co.jp) → kotobukiya_models.csv
-  - Hasegawa   (hasegawa-model.co.jp) → hasegawa_models.csv
+  - Kotobukiya (kotobukiya.co.jp)      → kotobukiya_models.csv
+  - Hasegawa   (hasegawa-model.co.jp)  → hasegawa_models.csv
+  - Volks      (hobby.volks.co.jp)     → volks_models.csv
 """
 
 import csv
@@ -191,6 +192,99 @@ def scrape_hasegawa():
 
 
 # ──────────────────────────────────────────────
+# Volks
+# ──────────────────────────────────────────────
+
+# プラモデル対象カテゴリ
+VOLKS_TARGET_CATS = {
+    "スケールモデル プロダクト",
+    "メカ・ロボット プロダクト",
+    "メカ・ロボット,フィギュア プロダクト",
+}
+
+# ガレージキット系は除外（injection plastic ではない）
+VOLKS_EXCLUDE_BRANDS = {
+    "HSGK", "SAV", "F.S.S. ガレージキット（GTM）",
+    "F.S.S. ガレージキット（MH）", "カラーレジンキット（ブルーナイト）",
+}
+
+def scrape_volks():
+    """
+    Fetch Volks products from their JSON API (hobby.volks.co.jp/products.json).
+    Returns injection-plastic model kits only (SWS, Blockers, IMS, etc.).
+    """
+    url = "https://hobby.volks.co.jp/products.json"
+    products = []
+
+    try:
+        resp = requests.get(
+            url,
+            headers={**HEADERS, "Referer": "https://hobby.volks.co.jp/products/brand/sws/"},
+            timeout=20,
+        )
+        if resp.status_code != 200:
+            print(f"  ⚠️  Volks JSON API: HTTP {resp.status_code}")
+            return products
+
+        # BOM 対応
+        raw = resp.content.decode("utf-8-sig")
+        import json
+        data = json.loads(raw)
+        items = data.get("items", data) if isinstance(data, dict) else data
+        print(f"  Volks: {len(items)} total items from API")
+
+        for item in items:
+            cat    = item.get("カテゴリー", "")
+            brands = item.get("ブランド", "")
+            title  = item.get("商品名", "").strip()
+            jan    = item.get("JAN", "").strip()
+            series = item.get("作品名", "").strip()
+
+            # カテゴリでフィルタ
+            if cat not in VOLKS_TARGET_CATS:
+                continue
+
+            # ガレージキット系を除外
+            brand_list = {b.strip() for b in brands.split(",")}
+            if brand_list & VOLKS_EXCLUDE_BRANDS:
+                continue
+
+            if not title:
+                continue
+
+            # グレード: ブランドから判定
+            grade = ""
+            if "造形村SWS" in brands or "SUPER WING SERIES" in brands:
+                grade = "SWS"
+            elif "ブロッカーズ" in brands:
+                grade = "ブロッカーズ"
+            elif "IMS" in brands:
+                grade = "IMS"
+            elif "NEXATE" in brands:
+                grade = "NEXATE"
+            else:
+                grade = "プラモデル"
+
+            # スケール: タイトルから抽出
+            scale_match = re.search(r"1[/／](\d+)", title)
+            scale = f"1/{scale_match.group(1)}" if scale_match else ""
+
+            products.append({
+                "jan":    jan,
+                "title":  title,
+                "maker":  "Volks",
+                "series": series,
+                "grade":  grade,
+                "scale":  scale,
+            })
+
+    except Exception as e:
+        print(f"  ⚠️  Volks: {e}")
+
+    return products
+
+
+# ──────────────────────────────────────────────
 # Save CSV
 # ──────────────────────────────────────────────
 
@@ -250,6 +344,13 @@ def main():
     hase_file = os.path.join(SCRIPT_DIR, "..", "hasegawa_models.csv")
     added, total = save_csv(hase_products, hase_file)
     print(f"  ✅ Added: {added} | Total: {total} → {hase_file}")
+
+    # ── Volks ──
+    print("\n🏯 Volks ...")
+    volks_products = scrape_volks()
+    volks_file = os.path.join(SCRIPT_DIR, "..", "volks_models.csv")
+    added, total = save_csv(volks_products, volks_file)
+    print(f"  ✅ Added: {added} | Total: {total} → {volks_file}")
 
     print("\n" + "=" * 60)
     print(f"✅ Done at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")

@@ -34,16 +34,14 @@ class CSVDataManager: ObservableObject {
     @Published var isLoading: Bool = false
 
     // List of ALL supported manufacturer catalogs
+    // Names must match the CSV filenames in GitHub Release (without .csv extension)
     private let availableCatalogs = [
         "gunpla_catalog",      // Bandai / Gunpla (Main)
-        "tamiya_military",     // Tamiya
-        "aoshima_cars",        // Aoshima
-        "hasegawa_aircraft",   // Hasegawa
         "kotobukiya_models",   // Kotobukiya
-        "fujimi_models",       // Fujimi
-        "finemolds_models",    // FineMolds
-        "maxfactory_dougram",  // MaxFactory
-        "volks_models"         // Volks
+        "tamiya_models",       // Tamiya  ← (旧: tamiya_military)
+        "hasegawa_models",     // Hasegawa ← (旧: hasegawa_aircraft)
+        "volks_models",        // Volks
+        "gsc_models",          // Good Smile Company (MODEROID / PLAMAX)
     ]
 
     init() {
@@ -101,16 +99,12 @@ class CSVDataManager: ObservableObject {
     }
     
     // カタログデータの読み込み (Simple 6-column format)
-    // Modified to use GitHubReleaseManager for gunpla_catalog, fallback to Bundle
+    // GitHubReleaseManager のキャッシュを全カタログで優先し、Bundle にフォールバック
     private static func loadCatalog(filename: String) -> [CSVKitData]? {
-        // Try GitHub Release Manager first (only for gunpla_catalog)
-        var csvContent: String?
+        // 1. GitHub Release キャッシュを優先（全メーカー共通）
+        var csvContent: String? = GitHubReleaseManager.shared.loadCatalog(filename: filename)
 
-        if filename == "gunpla_catalog" {
-            csvContent = GitHubReleaseManager.shared.loadCatalog(filename: filename)
-        }
-
-        // Fallback to Bundle for all other cases
+        // 2. Bundle にフォールバック
         if csvContent == nil {
             guard let path = Bundle.main.path(forResource: filename, ofType: "csv") else { return nil }
             csvContent = try? String(contentsOfFile: path, encoding: .utf8)
@@ -524,10 +518,18 @@ class CSVDataManager: ObservableObject {
 
     // MARK: - GitHub Release Updates
 
-    /// Check for catalog updates from GitHub and download if available
+    /// Check for catalog updates from GitHub and download if available.
+    /// If any catalog was updated, clears loadedKits and forces a fresh reload.
     private func checkForCatalogUpdates() async {
-        await GitHubReleaseManager.shared.checkAndUpdateIfNeeded()
-        // After checking, reload if cache was updated
-        Task { await reloadAll() }
+        let updated = await GitHubReleaseManager.shared.checkAndUpdateIfNeeded()
+        if updated {
+            // 新しいキャッシュを反映するため強制リロード
+            await MainActor.run {
+                self.loadedKits = []
+                self.isLoading = false
+            }
+            await performLoad()
+            print("CSVDataManager: 🔄 Reloaded after GitHub catalog update")
+        }
     }
 }

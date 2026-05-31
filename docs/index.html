@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>プラログ — ガンプラ管理アプリ</title>
+  <meta name="description" content="バーコード＆文字スキャンでガンプラをかんたん管理。9,400件超のカタログ対応。">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Yu Gothic", sans-serif;
+      background: #0a0a0a;
+      color: #f0f0f0;
+      line-height: 1.6;
+    }
+
+    /* ヘッダー */
+    header {
+      text-align: center;
+      padding: 80px 24px 60px;
+    }
+
+    .app-icon {
+      width: 120px;
+      height: 120px;
+      border-radius: 26px;
+      margin-bottom: 24px;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+    }
+
+    .app-icon-placeholder {
+      width: 120px;
+      height: 120px;
+      border-radius: 26px;
+      margin: 0 auto 24px;
+      background: #1a1a1a;
+      border: 2px solid #333;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 48px;
+      font-weight: 900;
+      color: #4CAF50;
+      letter-spacing: -2px;
+    }
+
+    h1 {
+      font-size: 48px;
+      font-weight: 800;
+      letter-spacing: -1px;
+      margin-bottom: 12px;
+    }
+
+    .subtitle {
+      font-size: 20px;
+      color: #888;
+      margin-bottom: 36px;
+    }
+
+    .download-btn {
+      display: inline-block;
+      background: #fff;
+      color: #000;
+      text-decoration: none;
+      padding: 14px 32px;
+      border-radius: 50px;
+      font-size: 17px;
+      font-weight: 600;
+      transition: opacity 0.2s;
+    }
+    .download-btn:hover { opacity: 0.85; }
+
+    .download-btn img {
+      height: 44px;
+      vertical-align: middle;
+    }
+
+    /* スクリーンショット */
+    .screenshots {
+      overflow-x: auto;
+      display: flex;
+      gap: 16px;
+      padding: 40px 24px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+
+    .screenshots img {
+      height: 480px;
+      border-radius: 16px;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+    }
+
+    /* 機能 */
+    .features {
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 60px 24px;
+    }
+
+    .features h2 {
+      font-size: 32px;
+      font-weight: 700;
+      text-align: center;
+      margin-bottom: 48px;
+    }
+
+    .feature-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 24px;
+    }
+
+    .feature-card {
+      background: #1a1a1a;
+      border-radius: 16px;
+      padding: 28px 24px;
+      border: 1px solid #222;
+    }
+
+    .feature-icon {
+      font-size: 36px;
+      margin-bottom: 12px;
+    }
+
+    .feature-card h3 {
+      font-size: 18px;
+      font-weight: 700;
+      margin-bottom: 8px;
+      color: #4CAF50;
+    }
+
+    .feature-card p {
+      font-size: 15px;
+      color: #aaa;
+    }
+
+    /* CTA */
+    .cta {
+      text-align: center;
+      padding: 60px 24px 80px;
+      border-top: 1px solid #1a1a1a;
+    }
+
+    .cta h2 {
+      font-size: 28px;
+      font-weight: 700;
+      margin-bottom: 12px;
+    }
+
+    .cta p {
+      color: #888;
+      margin-bottom: 32px;
+    }
+
+    /* フッター */
+    footer {
+      border-top: 1px solid #1a1a1a;
+      padding: 32px 24px;
+      text-align: center;
+      color: #555;
+      font-size: 14px;
+    }
+
+    footer a {
+      color: #888;
+      text-decoration: none;
+      margin: 0 12px;
+    }
+    footer a:hover { color: #fff; }
+  </style>
+</head>
+<body>
+
+  <!-- ヘッダー -->
+  <header>
+    <!-- アイコン画像がある場合は下の行のコメントを外して使用 -->
+    <!-- <img src="icon.png" alt="プラログ アイコン" class="app-icon"> -->
+    <div class="app-icon-placeholder">PLA<br>LOG</div>
+    <h1>プラログ</h1>
+    <p class="subtitle">ガンプラ管理を、もっとかんたんに。</p>
+    <a href="https://apps.apple.com/jp/app/plalog/id6758055027" class="download-btn">
+      App Store でダウンロード
+    </a>
+  </header>
+
+  <!-- スクリーンショット（App Storeのものを保存してdocsフォルダに入れてください） -->
+  <!--
+  <section class="screenshots">
+    <img src="screenshots/01.png" alt="コレクション一覧">
+    <img src="screenshots/02.png" alt="バーコードスキャン">
+    <img src="screenshots/03.png" alt="OCR読み取り">
+    <img src="screenshots/04.png" alt="データベース検索">
+    <img src="screenshots/05.png" alt="ギャラリー">
+  </section>
+  -->
+
+  <!-- 機能 -->
+  <section class="features">
+    <h2>主な機能</h2>
+    <div class="feature-grid">
+      <div class="feature-card">
+        <div class="feature-icon">📷</div>
+        <h3>文字スキャン（OCR）</h3>
+        <p>カメラで商品名を読み取って即検索。箱をかざすだけで登録できます。</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">🔍</div>
+        <h3>バーコードスキャン</h3>
+        <p>JANコードから瞬時にキットを特定。9,400件超のカタログに対応。</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">📊</div>
+        <h3>ステータス管理</h3>
+        <p>購入済み・制作中・完成品をステータスで整理。コレクションを一覧で把握。</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">🖼️</div>
+        <h3>ギャラリー</h3>
+        <p>完成品を写真付きで記録。塗装・改造のログも残せます。</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">☁️</div>
+        <h3>CloudKit 同期</h3>
+        <p>iPhoneとiPadで自動同期。データはAppleのサーバーに安全に保存。</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">📱</div>
+        <h3>iPhone / iPad 対応</h3>
+        <p>各デバイスに最適化されたUIで快適に使えます。</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- CTA -->
+  <section class="cta">
+    <h2>まずは無料でためしてみる</h2>
+    <p>積みプラが増えすぎて把握できない方に。</p>
+    <a href="https://apps.apple.com/jp/app/plalog/id6758055027" class="download-btn">
+      App Store でダウンロード
+    </a>
+  </section>
+
+  <!-- フッター -->
+  <footer>
+    <p>
+      <a href="https://absorbed-larkspur-419.notion.site/PLALOG-2e6e83e323d68083aa55ec6a4a97415f">プライバシーポリシー</a>
+      <a href="https://absorbed-larkspur-419.notion.site/PLALOG-2e6e83e323d680e6a04dd663b71ece0b">サポート</a>
+      <a href="mailto:hiro.s.rx7@gmail.com">お問い合わせ</a>
+    </p>
+    <p style="margin-top: 16px;">© 2024 Hiroshi Suga. All rights reserved.</p>
+  </footer>
+
+</body>
+</html>
